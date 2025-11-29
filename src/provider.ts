@@ -1,20 +1,20 @@
 import * as vscode from 'vscode';
 import { VLLMClient } from './client';
-import { VLLMConfig } from './types';
+import { VLLMConfig, OpenAIChatCompletionRequest } from './types';
 
 /**
  * Language model provider for vLLM server
  */
 export class VLLMProvider implements vscode.LanguageModelChatProvider {
-  private client: VLLMClient;
+  private readonly client: VLLMClient;
   private config: VLLMConfig;
-  private outputChannel: vscode.OutputChannel;
+  private readonly outputChannel: vscode.OutputChannel;
   // Store tool schemas for the current request to fill missing required properties
-  private currentToolSchemas: Map<string, any> = new Map();
+  private readonly currentToolSchemas: Map<string, unknown> = new Map();
   // Track if we've shown the welcome notification this session
   private hasShownWelcomeNotification = false;
 
-  constructor(private context: vscode.ExtensionContext) {
+  constructor(private readonly context: vscode.ExtensionContext) {
     this.outputChannel = vscode.window.createOutputChannel('GitHub Copilot LLM Gateway');
     this.config = this.loadConfig();
     this.client = new VLLMClient(this.config);
@@ -30,61 +30,70 @@ export class VLLMProvider implements vscode.LanguageModelChatProvider {
     );
   }
 
-  // Helper method: convertMessages (kept for potential future use)
-  private convertMessages(messages: readonly vscode.LanguageModelChatMessage[]): any[] {
-    const openAIMessages: any[] = [];
-    for (const msg of messages) {
-      let role: string;
-      if (msg.role === vscode.LanguageModelChatMessageRole.User) {
-        role = 'user';
-      } else if (msg.role === vscode.LanguageModelChatMessageRole.Assistant) {
-        role = 'assistant';
-      } else {
-        role = 'user';
-      }
+  /**
+   * Map VS Code message role to OpenAI role string
+   */
+  private mapRole(role: vscode.LanguageModelChatMessageRole): string {
+    if (role === vscode.LanguageModelChatMessageRole.User) {
+      return 'user';
+    }
+    if (role === vscode.LanguageModelChatMessageRole.Assistant) {
+      return 'assistant';
+    }
+    return 'user';
+  }
 
-      const toolResults: any[] = [];
+  /**
+   * Convert a tool result part to OpenAI format
+   */
+  private convertToolResultPart(part: vscode.LanguageModelToolResultPart): Record<string, unknown> {
+    return {
+      tool_call_id: part.callId,
+      role: 'tool',
+      content: typeof part.content === 'string' ? part.content : JSON.stringify(part.content),
+    };
+  }
+
+  /**
+   * Convert a tool call part to OpenAI format
+   */
+  private convertToolCallPart(part: vscode.LanguageModelToolCallPart): Record<string, unknown> {
+    return {
+      id: part.callId,
+      type: 'function',
+      function: {
+        name: part.name,
+        arguments: JSON.stringify(part.input),
+      },
+    };
+  }
+
+  // Helper method: convertMessages (kept for potential future use)
+  private convertMessages(messages: readonly vscode.LanguageModelChatMessage[]): Record<string, unknown>[] {
+    const openAIMessages: Record<string, unknown>[] = [];
+
+    for (const msg of messages) {
+      const role = this.mapRole(msg.role);
+      const toolResults: Record<string, unknown>[] = [];
+      const toolCalls: Record<string, unknown>[] = [];
       let textContent = '';
-      let toolCalls: any[] = [];
 
       for (const part of msg.content) {
         if (part instanceof vscode.LanguageModelTextPart) {
           textContent += part.value;
         } else if (part instanceof vscode.LanguageModelToolResultPart) {
-          toolResults.push({
-            tool_call_id: part.callId,
-            role: 'tool',
-            content: typeof part.content === 'string'
-              ? part.content
-              : JSON.stringify(part.content),
-          });
+          toolResults.push(this.convertToolResultPart(part));
         } else if (part instanceof vscode.LanguageModelToolCallPart) {
-          toolCalls.push({
-            id: part.callId,
-            type: 'function',
-            function: {
-              name: part.name,
-              arguments: JSON.stringify(part.input),
-            },
-          });
+          toolCalls.push(this.convertToolCallPart(part));
         }
       }
 
       if (toolCalls.length > 0) {
-        openAIMessages.push({
-          role: 'assistant',
-          content: textContent || null,
-          tool_calls: toolCalls,
-        });
+        openAIMessages.push({ role: 'assistant', content: textContent || null, tool_calls: toolCalls });
       } else if (toolResults.length > 0) {
-        for (const toolResult of toolResults) {
-          openAIMessages.push(toolResult);
-        }
+        openAIMessages.push(...toolResults);
       } else if (textContent) {
-        openAIMessages.push({
-          role,
-          content: textContent,
-        });
+        openAIMessages.push({ role, content: textContent });
       }
     }
 
@@ -148,8 +157,8 @@ export class VLLMProvider implements vscode.LanguageModelChatProvider {
   /**
    * Get default value for a JSON schema type
    */
-  private getDefaultForType(schema: any): any {
-    if (!schema || !schema.type) {
+  private getDefaultForType(schema: Record<string, unknown> | null | undefined): unknown {
+    if (!schema?.type) {
       return null;
     }
 
@@ -187,16 +196,16 @@ export class VLLMProvider implements vscode.LanguageModelChatProvider {
   /**
    * Fill in missing required properties with default values based on the tool schema
    */
-  private fillMissingRequiredProperties(args: any, toolName: string, toolSchema: any): any {
-    if (!toolSchema || !toolSchema.required || !Array.isArray(toolSchema.required)) {
+  private fillMissingRequiredProperties(args: Record<string, unknown>, toolName: string, toolSchema: Record<string, unknown> | null | undefined): Record<string, unknown> {
+    if (!toolSchema?.required || !Array.isArray(toolSchema.required)) {
       return args;
     }
 
-    const properties = toolSchema.properties || {};
+    const properties = (toolSchema.properties || {}) as Record<string, Record<string, unknown>>;
     const filledArgs = { ...args };
     const filledProperties: string[] = [];
 
-    for (const requiredProp of toolSchema.required) {
+    for (const requiredProp of toolSchema.required as string[]) {
       if (!(requiredProp in filledArgs)) {
         const propSchema = properties[requiredProp];
         const defaultValue = this.getDefaultForType(propSchema);
@@ -287,9 +296,30 @@ export class VLLMProvider implements vscode.LanguageModelChatProvider {
   }
 
   /**
+   * Count occurrences of a character in a string
+   */
+  private countChar(str: string, char: string): number {
+    return (str.match(new RegExp(char.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
+  }
+
+  /**
+   * Balance unclosed braces/brackets in a JSON string
+   */
+  private balanceBrackets(str: string): string {
+    let result = str;
+    const missingBrackets = this.countChar(result, '[') - this.countChar(result, ']');
+    const missingBraces = this.countChar(result, '{') - this.countChar(result, '}');
+
+    result += ']'.repeat(Math.max(0, missingBrackets));
+    result += '}'.repeat(Math.max(0, missingBraces));
+
+    return result;
+  }
+
+  /**
    * Attempt to repair truncated or malformed JSON arguments
    */
-  private tryRepairJson(jsonStr: string): any | null {
+  private tryRepairJson(jsonStr: string): unknown {
     if (!jsonStr || jsonStr.trim() === '') {
       return {};
     }
@@ -304,34 +334,16 @@ export class VLLMProvider implements vscode.LanguageModelChatProvider {
     // Attempt repairs for common issues
     let repaired = jsonStr.trim();
 
-    // Fix: missing closing braces/brackets
-    const openBraces = (repaired.match(/{/g) || []).length;
-    const closeBraces = (repaired.match(/}/g) || []).length;
-    const openBrackets = (repaired.match(/\[/g) || []).length;
-    const closeBrackets = (repaired.match(/]/g) || []).length;
+    // Fix missing closing brackets/braces
+    repaired = this.balanceBrackets(repaired);
 
-    // Add missing closing brackets
-    for (let i = 0; i < openBrackets - closeBrackets; i++) {
-      repaired += ']';
-    }
-    // Add missing closing braces
-    for (let i = 0; i < openBraces - closeBraces; i++) {
-      repaired += '}';
-    }
+    // Fix trailing comma before closing brace/bracket
+    repaired = repaired.replaceAll(/,\s*([}\]])/g, '$1');
 
-    // Fix: trailing comma before closing brace/bracket
-    repaired = repaired.replace(/,\s*([}\]])/g, '$1');
-
-    // Fix: truncated string value - close the string
-    if ((repaired.match(/"/g) || []).length % 2 !== 0) {
-      // Odd number of quotes - try to close the last string
+    // Fix truncated string value - close the string if odd number of quotes
+    if (this.countChar(repaired, '"') % 2 !== 0) {
       repaired += '"';
-      // Re-add closing braces if needed
-      const newOpenBraces = (repaired.match(/{/g) || []).length;
-      const newCloseBraces = (repaired.match(/}/g) || []).length;
-      for (let i = 0; i < newOpenBraces - newCloseBraces; i++) {
-        repaired += '}';
-      }
+      repaired = this.balanceBrackets(repaired);
     }
 
     try {
@@ -372,7 +384,7 @@ export class VLLMProvider implements vscode.LanguageModelChatProvider {
           this.outputChannel.appendLine(`  Raw arguments: ${toolCall.arguments.substring(0, 500)}${toolCall.arguments.length > 500 ? '...' : ''}`);
 
           // Parse arguments with repair capability
-          let args = this.tryRepairJson(toolCall.arguments);
+          let args = this.tryRepairJson(toolCall.arguments) as Record<string, unknown> | null;
 
           if (args === null) {
             this.outputChannel.appendLine(`ERROR: Failed to parse tool call arguments for ${toolCall.name}`);
@@ -383,7 +395,7 @@ export class VLLMProvider implements vscode.LanguageModelChatProvider {
           progress.report(new vscode.LanguageModelToolCallPart(
             toolCall.id,
             toolCall.name,
-            args
+            args as object
           ));
         }
       }
@@ -439,6 +451,212 @@ export class VLLMProvider implements vscode.LanguageModelChatProvider {
   }
 
   /**
+   * Process a message part using duck-typing for older VS Code versions
+   */
+  private processPartDuckTyped(
+    part: unknown,
+    toolResults: Record<string, unknown>[],
+    toolCalls: Record<string, unknown>[]
+  ): void {
+    const anyPart = part as Record<string, unknown>;
+    if ('callId' in anyPart && 'content' in anyPart && !('name' in anyPart)) {
+      this.outputChannel.appendLine(`  Found tool result (duck-typed): callId=${anyPart.callId}`);
+      toolResults.push({
+        tool_call_id: anyPart.callId,
+        role: 'tool',
+        content: typeof anyPart.content === 'string' ? anyPart.content : JSON.stringify(anyPart.content),
+      });
+    } else if ('callId' in anyPart && 'name' in anyPart && 'input' in anyPart) {
+      this.outputChannel.appendLine(`  Found tool call (duck-typed): callId=${anyPart.callId}, name=${anyPart.name}`);
+      toolCalls.push({
+        id: anyPart.callId,
+        type: 'function',
+        function: { name: anyPart.name, arguments: JSON.stringify(anyPart.input) },
+      });
+    }
+  }
+
+  /**
+   * Convert a single VS Code message to OpenAI format with logging
+   */
+  private convertSingleMessageWithLogging(msg: vscode.LanguageModelChatMessage): Record<string, unknown>[] {
+    const role = this.mapRole(msg.role);
+    const toolResults: Record<string, unknown>[] = [];
+    const toolCalls: Record<string, unknown>[] = [];
+    let textContent = '';
+
+    for (const part of msg.content) {
+      if (part instanceof vscode.LanguageModelTextPart) {
+        textContent += part.value;
+      } else if (part instanceof vscode.LanguageModelToolResultPart) {
+        this.outputChannel.appendLine(`  Found tool result: callId=${part.callId}`);
+        toolResults.push(this.convertToolResultPart(part));
+      } else if (part instanceof vscode.LanguageModelToolCallPart) {
+        this.outputChannel.appendLine(`  Found tool call: callId=${part.callId}, name=${part.name}`);
+        toolCalls.push(this.convertToolCallPart(part));
+      } else {
+        this.processPartDuckTyped(part, toolResults, toolCalls);
+      }
+    }
+
+    const result: Record<string, unknown>[] = [];
+    if (toolCalls.length > 0) {
+      result.push({ role: 'assistant', content: textContent || null, tool_calls: toolCalls });
+    } else if (toolResults.length > 0) {
+      result.push(...toolResults);
+    } else if (textContent) {
+      result.push({ role, content: textContent });
+    }
+    return result;
+  }
+
+  /**
+   * Calculate safe max output tokens based on input estimate
+   */
+  private calculateSafeMaxOutputTokens(estimatedInputTokens: number, toolsOverhead: number): number {
+    const modelMaxContext = this.config.defaultMaxTokens || 32768;
+    const totalEstimatedTokens = estimatedInputTokens + toolsOverhead;
+    const conservativeInputEstimate = Math.ceil(totalEstimatedTokens * 1.2);
+    const bufferTokens = 256;
+
+    let safeMaxOutputTokens = Math.min(
+      this.config.defaultMaxOutputTokens || 2048,
+      Math.floor(modelMaxContext - conservativeInputEstimate - bufferTokens)
+    );
+
+    return Math.max(64, safeMaxOutputTokens);
+  }
+
+  /**
+   * Build tools configuration for request
+   */
+  private buildToolsConfig(options: vscode.ProvideLanguageModelChatResponseOptions): Record<string, unknown>[] | undefined {
+    if (!this.config.enableToolCalling || !options.tools || options.tools.length === 0) {
+      return undefined;
+    }
+
+    this.currentToolSchemas.clear();
+
+    return options.tools.map((tool) => {
+      this.outputChannel.appendLine(`Tool: ${tool.name}`);
+      this.outputChannel.appendLine(`  Description: ${tool.description?.substring(0, 100) || 'none'}...`);
+
+      const schema = tool.inputSchema as Record<string, unknown> | undefined;
+      this.currentToolSchemas.set(tool.name, schema);
+
+      if (schema?.required && Array.isArray(schema.required)) {
+        this.outputChannel.appendLine(`  Required properties: ${(schema.required as string[]).join(', ')}`);
+      }
+
+      return {
+        type: 'function',
+        function: { name: tool.name, description: tool.description, parameters: tool.inputSchema },
+      };
+    });
+  }
+
+  /**
+   * Process a single tool call from the stream
+   */
+  private processToolCall(
+    toolCall: { id: string; name: string; arguments: string },
+    progress: vscode.Progress<vscode.LanguageModelResponsePart>
+  ): void {
+    this.outputChannel.appendLine(`\n=== TOOL CALL RECEIVED ===`);
+    this.outputChannel.appendLine(`  ID: ${toolCall.id}`);
+    this.outputChannel.appendLine(`  Name: ${toolCall.name}`);
+    this.outputChannel.appendLine(`  Raw arguments: ${toolCall.arguments.substring(0, 1000)}${toolCall.arguments.length > 1000 ? '...' : ''}`);
+
+    let args = this.tryRepairJson(toolCall.arguments) as Record<string, unknown> | null;
+
+    if (args === null) {
+      this.outputChannel.appendLine(`  ERROR: Failed to parse tool call arguments`);
+      this.outputChannel.appendLine(`  Full arguments: ${toolCall.arguments}`);
+      args = {};
+    } else {
+      const argKeys = Object.keys(args);
+      this.outputChannel.appendLine(`  Parsed argument keys: ${argKeys.length > 0 ? argKeys.join(', ') : '(none)'}`);
+    }
+
+    const toolSchema = this.currentToolSchemas.get(toolCall.name) as Record<string, unknown> | undefined;
+    if (toolSchema) {
+      args = this.fillMissingRequiredProperties(args, toolCall.name, toolSchema);
+    }
+
+    this.outputChannel.appendLine(`=== END TOOL CALL ===\n`);
+    progress.report(new vscode.LanguageModelToolCallPart(toolCall.id, toolCall.name, args));
+  }
+
+  /**
+   * Handle empty response from model
+   */
+  private async handleEmptyResponse(
+    model: vscode.LanguageModelChatInformation,
+    inputText: string,
+    messageCount: number,
+    toolCount: number,
+    token: vscode.CancellationToken,
+    progress: vscode.Progress<vscode.LanguageModelResponsePart>
+  ): Promise<void> {
+    const inputTokenCount = await this.provideTokenCount(model, inputText, token);
+    const modelMaxContext = this.config.defaultMaxTokens || 32768;
+
+    this.outputChannel.appendLine(`WARNING: Model returned empty response with no tool calls.`);
+    this.outputChannel.appendLine(`  Input tokens estimated: ${inputTokenCount}`);
+    this.outputChannel.appendLine(`  Messages in conversation: ${messageCount}`);
+    this.outputChannel.appendLine(`  Tools provided: ${toolCount}`);
+
+    const errorHint = toolCount > 0
+      ? `The model returned an empty response. This typically indicates the model failed to generate valid output with tool calling enabled. Check the vLLM server logs for errors.`
+      : `The model returned an empty response. Check the vLLM server logs for details.`;
+
+    this.outputChannel.appendLine(`  Issue: ${errorHint}`);
+
+    const errorMessage = `I was unable to generate a response. ${errorHint}\n\n` +
+      `Diagnostic info:\n- Model: ${model.id}\n- Tools provided: ${toolCount}\n` +
+      `- Estimated input tokens: ${inputTokenCount}\n- Context limit: ${modelMaxContext}\n\n` +
+      `Check the "GitHub Copilot LLM Gateway" output panel for detailed logs.`;
+
+    progress.report(new vscode.LanguageModelTextPart(errorMessage));
+  }
+
+  /**
+   * Handle chat request error
+   */
+  private handleChatError(error: unknown): never {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : '';
+
+    this.outputChannel.appendLine(`ERROR: Chat request failed: ${errorMessage}`);
+    if (errorStack) {
+      this.outputChannel.appendLine(`Stack trace: ${errorStack}`);
+    }
+
+    const isToolError = errorMessage.includes('HarmonyError') || errorMessage.includes('unexpected tokens');
+
+    if (isToolError) {
+      this.outputChannel.appendLine('HINT: This appears to be a tool calling format error.');
+      this.outputChannel.appendLine('The model may not support function calling properly.');
+      this.outputChannel.appendLine('Try: 1) Using a different model, 2) Disabling tool calling in settings, or 3) Checking vLLM server logs');
+
+      vscode.window.showErrorMessage(
+        `GitHub Copilot LLM Gateway: Model failed to generate valid tool calls. This model may not support function calling. Check Output panel for details.`,
+        'Open Output', 'Disable Tool Calling'
+      ).then((selection: string | undefined) => {
+        if (selection === 'Open Output') {
+          this.outputChannel.show();
+        } else if (selection === 'Disable Tool Calling') {
+          vscode.workspace.getConfiguration('github.copilot.llm-gateway').update('enableToolCalling', false, vscode.ConfigurationTarget.Global);
+        }
+      });
+    } else {
+      vscode.window.showErrorMessage(`GitHub Copilot LLM Gateway: Chat request failed. ${errorMessage}`);
+    }
+
+    throw error;
+  }
+
+  /**
    * Provide language model chat response - streams responses from vLLM server
    */
   async provideLanguageModelChatResponse(
@@ -452,349 +670,105 @@ export class VLLMProvider implements vscode.LanguageModelChatProvider {
     this.outputChannel.appendLine(`Tool mode: ${options.toolMode}, Tools: ${options.tools?.length || 0}`);
     this.outputChannel.appendLine(`Message count: ${messages.length}`);
 
-    // Show welcome notification (once per session)
     this.showWelcomeNotification(model.id);
 
-    // Convert VS Code messages to OpenAI format
-    const openAIMessages: any[] = [];
-
+    // Convert messages
+    const openAIMessages: Record<string, unknown>[] = [];
     for (const msg of messages) {
-      // Determine the role
-      let role: string;
-      if (msg.role === vscode.LanguageModelChatMessageRole.User) {
-        role = 'user';
-      } else if (msg.role === vscode.LanguageModelChatMessageRole.Assistant) {
-        role = 'assistant';
-      } else {
-        // Default to user for any other role types
-        role = 'user';
-      }
-
-      // Check if this message contains tool results
-      const toolResults: any[] = [];
-      let textContent = '';
-      let toolCalls: any[] = [];
-
-      for (const part of msg.content) {
-        if (part instanceof vscode.LanguageModelTextPart) {
-          // Regular text content
-          textContent += part.value;
-        } else if (part instanceof vscode.LanguageModelToolResultPart) {
-          // This is a LanguageModelToolResultPart - tool execution result
-          this.outputChannel.appendLine(`  Found tool result: callId=${part.callId}`);
-          toolResults.push({
-            tool_call_id: part.callId,
-            role: 'tool',
-            content: typeof part.content === 'string'
-              ? part.content
-              : JSON.stringify(part.content),
-          });
-        } else if (part instanceof vscode.LanguageModelToolCallPart) {
-          // This is a LanguageModelToolCallPart - tool invocation from assistant
-          this.outputChannel.appendLine(`  Found tool call: callId=${part.callId}, name=${part.name}`);
-          toolCalls.push({
-            id: part.callId,
-            type: 'function',
-            function: {
-              name: part.name,
-              arguments: JSON.stringify(part.input),
-            },
-          });
-        } else {
-          // Fallback: try duck-typing for older VS Code versions or edge cases
-          const anyPart = part as any;
-          if ('callId' in anyPart && 'content' in anyPart && !('name' in anyPart)) {
-            // Looks like a tool result
-            this.outputChannel.appendLine(`  Found tool result (duck-typed): callId=${anyPart.callId}`);
-            toolResults.push({
-              tool_call_id: anyPart.callId,
-              role: 'tool',
-              content: typeof anyPart.content === 'string'
-                ? anyPart.content
-                : JSON.stringify(anyPart.content),
-            });
-          } else if ('callId' in anyPart && 'name' in anyPart && 'input' in anyPart) {
-            // Looks like a tool call
-            this.outputChannel.appendLine(`  Found tool call (duck-typed): callId=${anyPart.callId}, name=${anyPart.name}`);
-            toolCalls.push({
-              id: anyPart.callId,
-              type: 'function',
-              function: {
-                name: anyPart.name,
-                arguments: JSON.stringify(anyPart.input),
-              },
-            });
-          }
-        }
-      }
-
-      // Add assistant message with tool calls if present
-      if (toolCalls.length > 0) {
-        openAIMessages.push({
-          role: 'assistant',
-          content: textContent || null,
-          tool_calls: toolCalls,
-        });
-      } else if (toolResults.length > 0) {
-        // Add each tool result as a separate message
-        for (const toolResult of toolResults) {
-          openAIMessages.push(toolResult);
-        }
-      } else if (textContent) {
-        // Regular message with text content
-        openAIMessages.push({
-          role,
-          content: textContent,
-        });
-      }
+      openAIMessages.push(...this.convertSingleMessageWithLogging(msg));
     }
-
     this.outputChannel.appendLine(`Converted to ${openAIMessages.length} OpenAI messages`);
 
-    // Log message structure for debugging
+    // Log message structure
     for (let i = 0; i < openAIMessages.length; i++) {
       const msg = openAIMessages[i];
-      this.outputChannel.appendLine(`  Message ${i + 1}: role=${msg.role}, ` +
-        `hasContent=${!!msg.content}, hasToolCalls=${!!msg.tool_calls}, ` +
-        `toolCallId=${msg.tool_call_id || 'none'}`);
+      this.outputChannel.appendLine(`  Message ${i + 1}: role=${msg.role}, hasContent=${!!msg.content}, hasToolCalls=${!!msg.tool_calls}, toolCallId=${msg.tool_call_id || 'none'}`);
     }
 
-    // Estimate input tokens and truncate if necessary
+    // Calculate token limits and truncate
     const modelMaxContext = this.config.defaultMaxTokens || 32768;
     const desiredOutputTokens = Math.min(this.config.defaultMaxOutputTokens || 2048, Math.floor(modelMaxContext / 2));
+    const toolsTokenEstimate = options.tools ? Math.ceil(JSON.stringify(options.tools).length / 4 * 1.2) : 0;
+    const maxInputTokens = modelMaxContext - desiredOutputTokens - toolsTokenEstimate - 256;
 
-    // Estimate tokens for tools/functions schema (reserve space for this)
-    const toolsTokenEstimate = options.tools
-      ? Math.ceil(JSON.stringify(options.tools).length / 4 * 1.2) // 20% buffer
-      : 0;
-
-    const maxInputTokens = modelMaxContext - desiredOutputTokens - toolsTokenEstimate - 256; // 256 buffer
-
-    // Truncate messages if they exceed the context limit
     const truncatedMessages = this.truncateMessagesToFit(openAIMessages, maxInputTokens);
     if (truncatedMessages.length < openAIMessages.length) {
       this.outputChannel.appendLine(`WARNING: Truncated conversation from ${openAIMessages.length} to ${truncatedMessages.length} messages to fit context limit`);
     }
 
-    // Create a single text blob of the input messages for a rough token estimate
-    // Include tool_calls in the estimate as they add significant tokens
+    // Build input text for token estimation
     const inputText = truncatedMessages
       .map((m) => {
         let text = typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '');
-        if (m.tool_calls) {
-          text += JSON.stringify(m.tool_calls);
-        }
+        if (m.tool_calls) { text += JSON.stringify(m.tool_calls); }
         return text;
       })
       .join('\n');
 
-    // Estimate tokens for tools/functions schema (adds significant overhead)
-    const toolsOverhead = options.tools
-      ? Math.ceil(JSON.stringify(options.tools).length / 4)
-      : 0;
-
+    const toolsOverhead = options.tools ? Math.ceil(JSON.stringify(options.tools).length / 4) : 0;
     const estimatedInputTokens = await this.provideTokenCount(model, inputText, token);
-    const totalEstimatedTokens = estimatedInputTokens + toolsOverhead;
-
-    // Be conservative: use 20% buffer on top of estimate to account for tokenizer differences
-    const conservativeInputEstimate = Math.ceil(totalEstimatedTokens * 1.2);
-    const bufferTokens = 256; // leave room for system tokens and safety
-
-    let safeMaxOutputTokens = Math.min(
-      this.config.defaultMaxOutputTokens || 2048,
-      Math.floor(modelMaxContext - conservativeInputEstimate - bufferTokens)
-    );
-
-    // Ensure a reasonable minimum
-    if (safeMaxOutputTokens < 64) {
-      safeMaxOutputTokens = 64;
-    }
+    const safeMaxOutputTokens = this.calculateSafeMaxOutputTokens(estimatedInputTokens, toolsOverhead);
 
     this.outputChannel.appendLine(
-      `Token estimate: input=${estimatedInputTokens}, tools=${toolsOverhead}, conservative=${conservativeInputEstimate}, model_context=${modelMaxContext}, chosen_max_tokens=${safeMaxOutputTokens}`
+      `Token estimate: input=${estimatedInputTokens}, tools=${toolsOverhead}, model_context=${modelMaxContext}, chosen_max_tokens=${safeMaxOutputTokens}`
     );
 
-    // Use lower temperature when tools are present for more consistent tool call formatting
+    // Build request
     const hasTools = this.config.enableToolCalling && options.tools && options.tools.length > 0;
-    const temperature = hasTools ? (this.config.agentTemperature ?? 0.0) : 0.7;
+    const temperature = hasTools ? (this.config.agentTemperature ?? 0) : 0.7;
 
-    const requestOptions: any = {
+    const requestOptions: Record<string, unknown> = {
       model: model.id,
       messages: truncatedMessages,
       max_tokens: safeMaxOutputTokens,
       temperature,
     };
 
-    // Add tools to request if enabled
-    if (hasTools) {
-      // Clear and repopulate tool schemas for this request
-      this.currentToolSchemas.clear();
-
-      requestOptions.tools = options.tools.map((tool) => {
-        // Log each tool's schema for debugging
-        this.outputChannel.appendLine(`Tool: ${tool.name}`);
-        this.outputChannel.appendLine(`  Description: ${tool.description?.substring(0, 100) || 'none'}...`);
-
-        // Store schema for later use when processing tool calls
-        const schema = tool.inputSchema as any;
-        this.currentToolSchemas.set(tool.name, schema);
-
-        if (schema?.required && Array.isArray(schema.required)) {
-          this.outputChannel.appendLine(`  Required properties: ${schema.required.join(', ')}`);
-        }
-
-        return {
-          type: 'function',
-          function: {
-            name: tool.name,
-            description: tool.description,
-            parameters: tool.inputSchema,
-          },
-        };
-      });
-
+    const toolsConfig = this.buildToolsConfig(options);
+    if (toolsConfig) {
+      requestOptions.tools = toolsConfig;
       if (options.toolMode !== undefined) {
         requestOptions.tool_choice = options.toolMode === vscode.LanguageModelChatToolMode.Required ? 'required' : 'auto';
       }
-
-      // Set parallel tool calling flag
       requestOptions.parallel_tool_calls = this.config.parallelToolCalling;
-
-      this.outputChannel.appendLine(`Sending ${requestOptions.tools.length} tools to model (parallel: ${this.config.parallelToolCalling})`);
+      this.outputChannel.appendLine(`Sending ${toolsConfig.length} tools to model (parallel: ${this.config.parallelToolCalling})`);
     }
 
-    // Add model options if provided
     if (options.modelOptions) {
       Object.assign(requestOptions, options.modelOptions);
     }
 
-    // Log the full request for debugging (truncate large content)
+    // Log request
     const debugRequest = JSON.stringify(requestOptions, null, 2);
-    if (debugRequest.length > 2000) {
-      this.outputChannel.appendLine(`Request (truncated): ${debugRequest.substring(0, 2000)}...`);
-    } else {
-      this.outputChannel.appendLine(`Request: ${debugRequest}`);
-    }
+    this.outputChannel.appendLine(debugRequest.length > 2000 ? `Request (truncated): ${debugRequest.substring(0, 2000)}...` : `Request: ${debugRequest}`);
 
     try {
       let totalContent = '';
       let totalToolCalls = 0;
 
-      for await (const chunk of this.client.streamChatCompletion(
-        requestOptions,
-        token
-      )) {
-        if (token.isCancellationRequested) {
-          break;
-        }
+      for await (const chunk of this.client.streamChatCompletion(requestOptions as unknown as OpenAIChatCompletionRequest, token)) {
+        if (token.isCancellationRequested) { break; }
 
-        // Report text content if present
         if (chunk.content) {
           totalContent += chunk.content;
           progress.report(new vscode.LanguageModelTextPart(chunk.content));
         }
 
-        // Process finished tool calls (client handles accumulation by index)
-        if (chunk.finished_tool_calls && chunk.finished_tool_calls.length > 0) {
+        if (chunk.finished_tool_calls?.length) {
           for (const toolCall of chunk.finished_tool_calls) {
             totalToolCalls++;
-            this.outputChannel.appendLine(`\n=== TOOL CALL RECEIVED ===`);
-            this.outputChannel.appendLine(`  ID: ${toolCall.id}`);
-            this.outputChannel.appendLine(`  Name: ${toolCall.name}`);
-            this.outputChannel.appendLine(`  Raw arguments: ${toolCall.arguments.substring(0, 1000)}${toolCall.arguments.length > 1000 ? '...' : ''}`);
-
-            // Parse arguments with repair capability
-            let args = this.tryRepairJson(toolCall.arguments);
-
-            if (args === null) {
-              this.outputChannel.appendLine(`  ERROR: Failed to parse tool call arguments`);
-              this.outputChannel.appendLine(`  Full arguments: ${toolCall.arguments}`);
-              args = {}; // Fallback to empty args
-            } else {
-              // Log the parsed arguments keys to help debug missing required properties
-              const argKeys = Object.keys(args);
-              this.outputChannel.appendLine(`  Parsed argument keys: ${argKeys.length > 0 ? argKeys.join(', ') : '(none)'}`);
-            }
-
-            // Fill in missing required properties based on tool schema
-            const toolSchema = this.currentToolSchemas.get(toolCall.name);
-            if (toolSchema) {
-              args = this.fillMissingRequiredProperties(args, toolCall.name, toolSchema);
-            }
-
-            this.outputChannel.appendLine(`=== END TOOL CALL ===\n`);
-
-            progress.report(new vscode.LanguageModelToolCallPart(
-              toolCall.id,
-              toolCall.name,
-              args
-            ));
+            this.processToolCall(toolCall, progress);
           }
         }
       }
 
       this.outputChannel.appendLine(`Completed chat request, received ${totalContent.length} characters, ${totalToolCalls} tool calls`);
 
-      // Handle empty response with no tool calls - provide helpful error message
       if (totalContent.length === 0 && totalToolCalls === 0) {
-        const toolCount = requestOptions.tools?.length || 0;
-        const inputTokenCount = await this.provideTokenCount(model, inputText, token);
-
-        this.outputChannel.appendLine(`WARNING: Model returned empty response with no tool calls.`);
-        this.outputChannel.appendLine(`  Input tokens estimated: ${inputTokenCount}`);
-        this.outputChannel.appendLine(`  Messages in conversation: ${openAIMessages.length}`);
-        this.outputChannel.appendLine(`  Tools provided: ${toolCount}`);
-
-        // Build a helpful error message - the model returned nothing
-        const errorHint = toolCount > 0
-          ? `The model returned an empty response. This typically indicates the model failed to generate valid output with tool calling enabled. Check the vLLM server logs for errors.`
-          : `The model returned an empty response. Check the vLLM server logs for details.`;
-
-        this.outputChannel.appendLine(`  Issue: ${errorHint}`);
-
-        // Report a text response to the user explaining the issue
-        const errorMessage = `I was unable to generate a response. ${errorHint}\n\n` +
-          `Diagnostic info:\n` +
-          `- Model: ${model.id}\n` +
-          `- Tools provided: ${toolCount}\n` +
-          `- Estimated input tokens: ${inputTokenCount}\n` +
-          `- Context limit: ${modelMaxContext}\n\n` +
-          `Check the "GitHub Copilot LLM Gateway" output panel for detailed logs.`;
-
-        progress.report(new vscode.LanguageModelTextPart(errorMessage));
+        await this.handleEmptyResponse(model, inputText, openAIMessages.length, requestOptions.tools ? (requestOptions.tools as unknown[]).length : 0, token, progress);
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      const errorStack = error instanceof Error ? error.stack : '';
-
-      this.outputChannel.appendLine(`ERROR: Chat request failed: ${errorMessage}`);
-      if (errorStack) {
-        this.outputChannel.appendLine(`Stack trace: ${errorStack}`);
-      }
-
-      // Check if this is a tool calling format error
-      if (errorMessage.includes('HarmonyError') || errorMessage.includes('unexpected tokens')) {
-        this.outputChannel.appendLine('HINT: This appears to be a tool calling format error.');
-        this.outputChannel.appendLine('The model may not support function calling properly.');
-        this.outputChannel.appendLine('Try: 1) Using a different model, 2) Disabling tool calling in settings, or 3) Checking vLLM server logs');
-
-        vscode.window.showErrorMessage(
-          `GitHub Copilot LLM Gateway: Model failed to generate valid tool calls. This model may not support function calling. Check Output panel for details.`,
-          'Open Output', 'Disable Tool Calling'
-        ).then((selection: string | undefined) => {
-          if (selection === 'Open Output') {
-            this.outputChannel.show();
-          } else if (selection === 'Disable Tool Calling') {
-            vscode.workspace.getConfiguration('github.copilot.llm-gateway').update('enableToolCalling', false, vscode.ConfigurationTarget.Global);
-          }
-        });
-      } else {
-        vscode.window.showErrorMessage(
-          `GitHub Copilot LLM Gateway: Chat request failed. ${errorMessage}`
-        );
-      }
-
-      throw error;
+      this.handleChatError(error);
     }
   }
 
@@ -857,7 +831,7 @@ export class VLLMProvider implements vscode.LanguageModelChatProvider {
       defaultMaxOutputTokens: config.get<number>('defaultMaxOutputTokens', 4096),
       enableToolCalling: config.get<boolean>('enableToolCalling', true),
       parallelToolCalling: config.get<boolean>('parallelToolCalling', true),
-      agentTemperature: config.get<number>('agentTemperature', 0.0),
+      agentTemperature: config.get<number>('agentTemperature', 0),
     };
 
     // Validate requestTimeout

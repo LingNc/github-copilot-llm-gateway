@@ -1,0 +1,17 @@
+.vscode/**
+.vscode-test/**
+src/**
+.gitignore
+.eslintrc.json
+eslint.config.mjs
+**/*.map
+**/*.ts
+tsconfig.json
+node_modules/**
+*.vsix
+.devcontainer/**
+PROJECT_SUMMARY.md
+INSTALLATION_TESTING.md
+package-lock.json
+yarn.lock
+pnpm-lock.yaml

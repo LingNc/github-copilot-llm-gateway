@@ -1,13 +1,13 @@
 import * as vscode from 'vscode';
-import { VLLMClient } from './client';
-import { VLLMConfig, OpenAIChatCompletionRequest } from './types';
+import { GatewayClient } from './client';
+import { GatewayConfig, OpenAIChatCompletionRequest } from './types';
 
 /**
- * Language model provider for vLLM server
+ * Language model provider for OpenAI-compatible inference servers
  */
-export class VLLMProvider implements vscode.LanguageModelChatProvider {
-  private readonly client: VLLMClient;
-  private config: VLLMConfig;
+export class GatewayProvider implements vscode.LanguageModelChatProvider {
+  private readonly client: GatewayClient;
+  private config: GatewayConfig;
   private readonly outputChannel: vscode.OutputChannel;
   // Store tool schemas for the current request to fill missing required properties
   private readonly currentToolSchemas: Map<string, unknown> = new Map();
@@ -17,7 +17,7 @@ export class VLLMProvider implements vscode.LanguageModelChatProvider {
   constructor(private readonly context: vscode.ExtensionContext) {
     this.outputChannel = vscode.window.createOutputChannel('GitHub Copilot LLM Gateway');
     this.config = this.loadConfig();
-    this.client = new VLLMClient(this.config);
+    this.client = new GatewayClient(this.config);
 
     // Watch for configuration changes
     context.subscriptions.push(
@@ -405,21 +405,21 @@ export class VLLMProvider implements vscode.LanguageModelChatProvider {
   }
 
   /**
-   * Provide language model information - fetches available models from vLLM server
+   * Provide language model information - fetches available models from inference server
    */
   async provideLanguageModelChatInformation(
     options: { silent: boolean; },
     token: vscode.CancellationToken
   ): Promise<vscode.LanguageModelChatInformation[]> {
     try {
-      this.outputChannel.appendLine('Fetching models from vLLM server...');
+      this.outputChannel.appendLine('Fetching models from inference server...');
       const response = await this.client.fetchModels();
 
       const models = response.data.map((model) => {
         const modelInfo: vscode.LanguageModelChatInformation = {
           id: model.id,
           name: model.id,
-          family: 'vllm-custom',
+          family: 'llm-gateway',
           maxInputTokens: this.config.defaultMaxTokens,
           maxOutputTokens: this.config.defaultMaxOutputTokens,
           version: '1.0.0',
@@ -607,8 +607,8 @@ export class VLLMProvider implements vscode.LanguageModelChatProvider {
     this.outputChannel.appendLine(`  Tools provided: ${toolCount}`);
 
     const errorHint = toolCount > 0
-      ? `The model returned an empty response. This typically indicates the model failed to generate valid output with tool calling enabled. Check the vLLM server logs for errors.`
-      : `The model returned an empty response. Check the vLLM server logs for details.`;
+      ? `The model returned an empty response. This typically indicates the model failed to generate valid output with tool calling enabled. Check the inference server logs for errors.`
+      : `The model returned an empty response. Check the inference server logs for details.`;
 
     this.outputChannel.appendLine(`  Issue: ${errorHint}`);
 
@@ -637,7 +637,7 @@ export class VLLMProvider implements vscode.LanguageModelChatProvider {
     if (isToolError) {
       this.outputChannel.appendLine('HINT: This appears to be a tool calling format error.');
       this.outputChannel.appendLine('The model may not support function calling properly.');
-      this.outputChannel.appendLine('Try: 1) Using a different model, 2) Disabling tool calling in settings, or 3) Checking vLLM server logs');
+      this.outputChannel.appendLine('Try: 1) Using a different model, 2) Disabling tool calling in settings, or 3) Checking inference server logs');
 
       vscode.window.showErrorMessage(
         `GitHub Copilot LLM Gateway: Model failed to generate valid tool calls. This model may not support function calling. Check Output panel for details.`,
@@ -657,7 +657,7 @@ export class VLLMProvider implements vscode.LanguageModelChatProvider {
   }
 
   /**
-   * Provide language model chat response - streams responses from vLLM server
+   * Provide language model chat response - streams responses from inference server
    */
   async provideLanguageModelChatResponse(
     model: vscode.LanguageModelChatInformation,
@@ -820,10 +820,10 @@ export class VLLMProvider implements vscode.LanguageModelChatProvider {
   /**
    * Load configuration from VS Code settings
    */
-  private loadConfig(): VLLMConfig {
+  private loadConfig(): GatewayConfig {
     const config = vscode.workspace.getConfiguration('github.copilot.llm-gateway');
 
-    const cfg: VLLMConfig = {
+    const cfg: GatewayConfig = {
       serverUrl: config.get<string>('serverUrl', 'http://localhost:8000'),
       apiKey: config.get<string>('apiKey', ''),
       requestTimeout: config.get<number>('requestTimeout', 60000),
@@ -844,8 +844,8 @@ export class VLLMProvider implements vscode.LanguageModelChatProvider {
     try {
       new URL(cfg.serverUrl);
     } catch {
-      this.outputChannel.appendLine(`ERROR: Invalid vLLM serverUrl: ${cfg.serverUrl}`);
-      throw new Error(`Invalid vLLM serverUrl: ${cfg.serverUrl}`);
+      this.outputChannel.appendLine(`ERROR: Invalid server URL: ${cfg.serverUrl}`);
+      throw new Error(`Invalid server URL: ${cfg.serverUrl}`);
     }
 
     // Validate defaultMaxOutputTokens relative to defaultMaxTokens

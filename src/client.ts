@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { randomBytes } from 'crypto';
+import { randomBytes } from 'node:crypto';
 import {
   OpenAIChatCompletionRequest,
   OpenAIModelsResponse,
@@ -23,6 +23,9 @@ interface ToolCallState {
   finalizedIndices: Set<number>;
   requestId: string;
   toolCallCounter: number;
+
+  // Add error handling for SSE events
+  handleSSEError(error: Error): void;
 }
 
 /**

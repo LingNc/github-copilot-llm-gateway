@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { randomBytes } from 'crypto';
 import {
   OpenAIChatCompletionRequest,
   OpenAIModelsResponse,
@@ -100,7 +101,7 @@ export class GatewayClient {
     return {
       toolCallsByIndex: new Map<number, StreamingToolCall>(),
       finalizedIndices: new Set<number>(),
-      requestId: `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+      requestId: `req_${Date.now()}_${randomBytes(4).toString('hex')}`,
       toolCallCounter: 0,
     };
   }

@@ -1,0 +1,126 @@
+{
+  "name": "github-copilot-llm-gateway",
+  "displayName": "GitHub Copilot LLM Gateway",
+  "description": "Connect GitHub Copilot to open-source models via vLLM or any OpenAI-compatible server",
+  "version": "0.1.0",
+  "publisher": "AndrewButson",
+  "icon": "assets/copilot-llm-gateway.png",
+  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arbs-io/github-copilot-llm-gateway.git"
+  },
+  "sponsor": {
+    "url": "https://github.com/sponsors/arbs-io"
+  },
+  "engines": {
+    "vscode": "^1.106.0"
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run esbuild-base -- --minify",
+    "esbuild-base": "esbuild ./src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --target=es2020",
+    "esbuild": "npm run esbuild-base -- --sourcemap",
+    "esbuild-watch": "npm run esbuild-base -- --sourcemap --watch",
+    "test-compile": "tsc -p ./",
+    "deploy": "vsce publish --no-yarn",
+    "package": "vsce package --no-yarn"
+  },
+  "categories": [
+    "AI",
+    "Machine Learning",
+    "Chat",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "copilot",
+    "vllm",
+    "Ollama",
+    "llama.cpp",
+    "LocalAI"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languageModelChatProviders": [
+      {
+        "vendor": "copilot-llm-gateway",
+        "displayName": "LLM Gateway"
+      }
+    ],
+    "commands": [
+      {
+        "command": "github.copilot.llm-gateway.testConnection",
+        "title": "Test Server Connection",
+        "category": "GitHub Copilot LLM Gateway"
+      }
+    ],
+    "configuration": {
+      "title": "GitHub Copilot LLM Gateway",
+      "properties": {
+        "github.copilot.llm-gateway.serverUrl": {
+          "type": "string",
+          "default": "http://localhost:8000",
+          "description": "Inference server URL (OpenAI API compatible endpoint)",
+          "order": 1
+        },
+        "github.copilot.llm-gateway.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key for authentication (optional, leave empty if not required)",
+          "order": 2
+        },
+        "github.copilot.llm-gateway.requestTimeout": {
+          "type": "number",
+          "default": 60000,
+          "description": "Request timeout in milliseconds",
+          "order": 3
+        },
+        "github.copilot.llm-gateway.defaultMaxTokens": {
+          "type": "number",
+          "default": 32768,
+          "description": "Default maximum input tokens for models (context window)",
+          "order": 4
+        },
+        "github.copilot.llm-gateway.defaultMaxOutputTokens": {
+          "type": "number",
+          "default": 4096,
+          "description": "Default maximum output tokens for models",
+          "order": 5
+        },
+        "github.copilot.llm-gateway.enableToolCalling": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable tool calling capability for models",
+          "order": 6
+        },
+        "github.copilot.llm-gateway.parallelToolCalling": {
+          "type": "boolean",
+          "default": true,
+          "description": "Allow model to call multiple tools in parallel (disable if model has issues with parallel calls)",
+          "order": 7
+        },
+        "github.copilot.llm-gateway.agentTemperature": {
+          "type": "number",
+          "default": 0.0,
+          "minimum": 0.0,
+          "maximum": 2.0,
+          "description": "Temperature for agent/tool calling mode (lower = more consistent tool call formatting). Set to 0.0 for best results with fine-tuned models.",
+          "order": 8
+        }
+      }
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@types/vscode": "^1.106.0",
+    "@typescript-eslint/eslint-plugin": "^8.48.0",
+    "@typescript-eslint/parser": "^8.48.0",
+    "@vscode/vsce": "^3.7.1",
+    "esbuild": "^0.27.0",
+    "eslint": "^9.39.1",
+    "typescript": "^5.9.3"
+  }
+}

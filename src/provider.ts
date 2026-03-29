@@ -1,33 +1,57 @@
+/**
+ * Provider for multi-provider configuration support
+ * Each GatewayProvider instance represents a single provider
+ */
+
 import * as vscode from 'vscode';
 import { GatewayClient } from './client';
-import { GatewayConfig, OpenAIChatCompletionRequest } from './types';
+import {
+  GatewayConfig,
+  OpenAIChatCompletionRequest,
+  ModelConfig,
+} from './types';
+import { ConfigManager } from './config/ConfigManager';
+import { ResolvedModel, ConfigMode } from './config/types';
 
 /**
  * Language model provider for OpenAI-compatible inference servers
+ * Supports multi-provider configuration
  */
 export class GatewayProvider implements vscode.LanguageModelChatProvider {
   private readonly client: GatewayClient;
-  private config: GatewayConfig;
+  private gatewayConfig: GatewayConfig;
   private readonly outputChannel: vscode.OutputChannel;
+  private configManager: ConfigManager;
+  private providerId: string;
+  private providerConfig: { baseURL: string; apiKey?: string };
   // Store tool schemas for the current request to fill missing required properties
   private readonly currentToolSchemas: Map<string, unknown> = new Map();
   // Track if we've shown the welcome notification this session
   private hasShownWelcomeNotification = false;
 
-  constructor(private readonly context: vscode.ExtensionContext) {
+  constructor(
+    context: vscode.ExtensionContext,
+    configManager: ConfigManager,
+    providerId: string
+  ) {
+    this.configManager = configManager;
+    this.providerId = providerId;
     this.outputChannel = vscode.window.createOutputChannel('GitHub Copilot LLM Gateway');
-    this.config = this.loadConfig();
-    this.client = new GatewayClient(this.config);
 
-    // Watch for configuration changes
-    context.subscriptions.push(
-      vscode.workspace.onDidChangeConfiguration((e: vscode.ConfigurationChangeEvent) => {
-        if (e.affectsConfiguration('github.copilot.llm-gateway')) {
-          this.outputChannel.appendLine('Configuration changed, reloading...');
-          this.reloadConfig();
-        }
-      })
-    );
+    // Get provider configuration
+    const provider = this.configManager.getProvider(providerId);
+    if (!provider) {
+      throw new Error(`Provider "${providerId}" not found in configuration`);
+    }
+
+    this.providerConfig = {
+      baseURL: provider.baseURL,
+      apiKey: provider.apiKey,
+    };
+
+    // Load legacy GatewayConfig for client compatibility
+    this.gatewayConfig = this.loadLegacyConfig();
+    this.client = new GatewayClient(this.gatewayConfig);
   }
 
   /**
@@ -68,7 +92,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     };
   }
 
-  // Helper method: convertMessages (kept for potential future use)
+  /**
+   * Convert messages to OpenAI format
+   */
   private convertMessages(messages: readonly vscode.LanguageModelChatMessage[]): Record<string, unknown>[] {
     const openAIMessages: Record<string, unknown>[] = [];
 
@@ -100,20 +126,24 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     return openAIMessages;
   }
 
-  // Helper method: buildRequestOptions
+  /**
+   * Build request options
+   */
   private buildRequestOptions(
     model: vscode.LanguageModelChatInformation,
     openAIMessages: any[],
     estimatedInputTokens: number
   ): any {
-    const modelMaxContext = this.config.defaultMaxTokens || 32768;
+    // Get model-specific limits from config
+    const resolvedModel = this.configManager.getModel(this.providerId, model.id);
+    const modelMaxContext = resolvedModel?.limit.context ?? this.gatewayConfig.defaultMaxTokens;
     const bufferTokens = 128;
     let safeMaxOutputTokens = Math.min(
-      this.config.defaultMaxOutputTokens || 2048,
+      resolvedModel?.limit.output ?? this.gatewayConfig.defaultMaxOutputTokens,
       Math.floor(modelMaxContext - estimatedInputTokens - bufferTokens)
     );
     if (safeMaxOutputTokens < 64) {
-      safeMaxOutputTokens = Math.max(64, Math.floor((this.config.defaultMaxOutputTokens || 2048) / 2));
+      safeMaxOutputTokens = Math.max(64, Math.floor((resolvedModel?.limit.output ?? 2048) / 2));
     }
 
     this.outputChannel.appendLine(
@@ -130,12 +160,18 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     return requestOptions;
   }
 
-  // Helper method: addTooling
+  /**
+   * Add tooling configuration
+   */
   private addTooling(
     requestOptions: any,
-    options: vscode.ProvideLanguageModelChatResponseOptions
+    options: vscode.ProvideLanguageModelChatResponseOptions,
+    modelCapabilities?: { toolCalling?: boolean }
   ): void {
-    if (this.config.enableToolCalling && options.tools && options.tools.length > 0) {
+    // Check if model supports tool calling
+    const supportsToolCalling = modelCapabilities?.toolCalling ?? this.gatewayConfig.enableToolCalling;
+
+    if (supportsToolCalling && options.tools && options.tools.length > 0) {
       requestOptions.tools = options.tools.map((tool) => ({
         type: 'function',
         function: {
@@ -149,8 +185,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         requestOptions.tool_choice = options.toolMode === vscode.LanguageModelChatToolMode.Required ? 'required' : 'auto';
       }
 
-      requestOptions.parallel_tool_calls = this.config.parallelToolCalling;
-      this.outputChannel.appendLine(`Sending ${requestOptions.tools.length} tools to model (parallel: ${this.config.parallelToolCalling})`);
+      requestOptions.parallel_tool_calls = this.gatewayConfig.parallelToolCalling;
+      this.outputChannel.appendLine(`Sending ${requestOptions.tools.length} tools to model (parallel: ${this.gatewayConfig.parallelToolCalling})`);
     }
   }
 
@@ -194,9 +230,13 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   }
 
   /**
-   * Fill in missing required properties with default values based on the tool schema
+   * Fill in missing required properties with default values
    */
-  private fillMissingRequiredProperties(args: Record<string, unknown>, toolName: string, toolSchema: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  private fillMissingRequiredProperties(
+    args: Record<string, unknown>,
+    toolName: string,
+    toolSchema: Record<string, unknown> | null | undefined
+  ): Record<string, unknown> {
     if (!toolSchema?.required || !Array.isArray(toolSchema.required)) {
       return args;
     }
@@ -239,9 +279,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   }
 
   /**
-   * Truncate messages to fit within a token limit.
-   * Strategy: Keep the first message (usually system prompt) and the most recent messages.
-   * Remove older messages from the middle of the conversation.
+   * Truncate messages to fit within token limit
    */
   private truncateMessagesToFit(messages: any[], maxTokens: number): any[] {
     if (messages.length === 0) {
@@ -363,7 +401,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     }
   }
 
-  // Helper method: streamChatCompletion (updated for new client interface)
+  /**
+   * Stream chat completion
+   */
   private async streamChatCompletion(
     requestOptions: any,
     progress: vscode.Progress<vscode.LanguageModelResponsePart>,
@@ -373,7 +413,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     let totalContent = '';
     let totalToolCalls = 0;
 
-    for await (const chunk of this.client.streamChatCompletion(requestOptions, token)) {
+    for await (const chunk of this.client.streamChatCompletion(requestOptions as OpenAIChatCompletionRequest, token)) {
       if (token.isCancellationRequested) {
         break;
       }
@@ -384,7 +424,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         progress.report(new vscode.LanguageModelTextPart(chunk.content));
       }
 
-      // Process finished tool calls (fully accumulated by client)
+      // Process finished tool calls
       if (chunk.finished_tool_calls && chunk.finished_tool_calls.length > 0) {
         for (const toolCall of chunk.finished_tool_calls) {
           totalToolCalls++;
@@ -413,53 +453,175 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   }
 
   /**
-   * Provide language model information - fetches available models from inference server
+   * Provide language model information
+   * Fetches models based on ConfigMode
    */
   async provideLanguageModelChatInformation(
     options: { silent: boolean; },
     token: vscode.CancellationToken
   ): Promise<vscode.LanguageModelChatInformation[]> {
-    try {
-      this.outputChannel.appendLine('Fetching models from inference server...');
-      const response = await this.client.fetchModels();
+    const configMode = this.configManager.getConfigMode();
+    const showProviderPrefix = this.configManager.shouldShowProviderPrefix();
 
-      const models = response.data.map((model) => {
-        const modelInfo: vscode.LanguageModelChatInformation = {
-          id: model.id,
-          name: model.id,
-          family: 'llm-gateway',
-          maxInputTokens: this.config.defaultMaxTokens,
-          maxOutputTokens: this.config.defaultMaxOutputTokens,
-          version: '1.0.0',
-          capabilities: {
-            toolCalling: this.config.enableToolCalling
-          },
-        };
+    this.outputChannel.appendLine(`Fetching models for provider "${this.providerId}" (mode: ${configMode})...`);
 
-        return modelInfo;
-      });
+    // Get configured models
+    const configuredModels = this.configManager.getModelsForProvider(this.providerId);
 
-      this.outputChannel.appendLine(`Found ${models.length} models: ${models.map(m => m.id).join(', ')}`);
-      return models;
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      this.outputChannel.appendLine(`ERROR: Failed to fetch models: ${errorMessage}`); if (!options.silent) {
-        vscode.window.showErrorMessage(
-          `GitHub Copilot LLM Gateway: Failed to fetch models. ${errorMessage}`,
-          'Open Settings'
-        ).then((selection: string | undefined) => {
-          if (selection === 'Open Settings') {
-            vscode.commands.executeCommand('workbench.action.openSettings', 'github.copilot.llm-gateway');
-          }
-        });
-      }
+    // Handle different config modes
+    switch (configMode) {
+      case 'config-only':
+        return this.buildModelInfoFromConfig(configuredModels, showProviderPrefix);
 
-      return [];
+      case 'config-priority':
+        return await this.fetchModelsWithConfigPriority(configuredModels, showProviderPrefix, options, token);
+
+      case 'api-priority':
+        return await this.fetchModelsWithApiPriority(configuredModels, showProviderPrefix, options, token);
+
+      default:
+        return this.buildModelInfoFromConfig(configuredModels, showProviderPrefix);
     }
   }
 
   /**
-   * Process a message part using duck-typing for older VS Code versions
+   * Build model info from configuration only
+   */
+  private buildModelInfoFromConfig(
+    models: ResolvedModel[],
+    showProviderPrefix: boolean
+  ): vscode.LanguageModelChatInformation[] {
+    return models.map((model) => ({
+      id: model.id,
+      name: showProviderPrefix ? `${model.providerId}/${model.name}` : model.name,
+      family: 'llm-gateway',
+      maxInputTokens: model.limit.context,
+      maxOutputTokens: model.limit.output,
+      version: '1.0.0',
+      capabilities: {
+        toolCalling: model.capabilities?.toolCalling ?? true,
+      },
+    }));
+  }
+
+  /**
+   * Fetch models with config priority (config overrides API)
+   */
+  private async fetchModelsWithConfigPriority(
+    configuredModels: ResolvedModel[],
+    showProviderPrefix: boolean,
+    options: { silent: boolean; },
+    token: vscode.CancellationToken
+  ): Promise<vscode.LanguageModelChatInformation[]> {
+    // First, get configured models as base
+    const modelMap = new Map<string, vscode.LanguageModelChatInformation>();
+
+    for (const model of configuredModels) {
+      modelMap.set(model.id, {
+        id: model.id,
+        name: showProviderPrefix ? `${model.providerId}/${model.name}` : model.name,
+        family: 'llm-gateway',
+        maxInputTokens: model.limit.context,
+        maxOutputTokens: model.limit.output,
+        version: '1.0.0',
+        capabilities: {
+          toolCalling: model.capabilities?.toolCalling ?? true,
+        },
+      });
+    }
+
+    // Then try to fetch from API and merge
+    try {
+      const response = await this.client.fetchModels();
+
+      for (const apiModel of response.data) {
+        // If model already in config, keep config values (config priority)
+        if (!modelMap.has(apiModel.id)) {
+          // Use defaults for API-only models
+          const defaultMaxTokens = this.gatewayConfig.defaultMaxTokens;
+          const defaultMaxOutput = this.gatewayConfig.defaultMaxOutputTokens;
+
+          modelMap.set(apiModel.id, {
+            id: apiModel.id,
+            name: showProviderPrefix ? `${this.providerId}/${apiModel.id}` : apiModel.id,
+            family: 'llm-gateway',
+            maxInputTokens: defaultMaxTokens,
+            maxOutputTokens: defaultMaxOutput,
+            version: '1.0.0',
+            capabilities: {
+              toolCalling: this.gatewayConfig.enableToolCalling,
+            },
+          });
+        }
+      }
+
+      this.outputChannel.appendLine(`Merged ${modelMap.size} models (config + API)`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.outputChannel.appendLine(`API fetch failed, using config only: ${message}`);
+    }
+
+    return Array.from(modelMap.values());
+  }
+
+  /**
+   * Fetch models with API priority (API overrides config for existing models)
+   */
+  private async fetchModelsWithApiPriority(
+    configuredModels: ResolvedModel[],
+    showProviderPrefix: boolean,
+    options: { silent: boolean; },
+    token: vscode.CancellationToken
+  ): Promise<vscode.LanguageModelChatInformation[]> {
+    const modelMap = new Map<string, ResolvedModel>();
+
+    // Store configured models
+    for (const model of configuredModels) {
+      modelMap.set(model.id, model);
+    }
+
+    try {
+      const response = await this.client.fetchModels();
+      const result: vscode.LanguageModelChatInformation[] = [];
+
+      for (const apiModel of response.data) {
+        const configuredModel = modelMap.get(apiModel.id);
+
+        // API priority: use API model id, but config values if available
+        result.push({
+          id: apiModel.id,
+          name: showProviderPrefix
+            ? `${this.providerId}/${configuredModel?.name ?? apiModel.id}`
+            : (configuredModel?.name ?? apiModel.id),
+          family: 'llm-gateway',
+          maxInputTokens: configuredModel?.limit.context ?? this.gatewayConfig.defaultMaxTokens,
+          maxOutputTokens: configuredModel?.limit.output ?? this.gatewayConfig.defaultMaxOutputTokens,
+          version: '1.0.0',
+          capabilities: {
+            toolCalling: configuredModel?.capabilities?.toolCalling ?? this.gatewayConfig.enableToolCalling,
+          },
+        });
+      }
+
+      this.outputChannel.appendLine(`Fetched ${result.length} models from API (with config overrides)`);
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.outputChannel.appendLine(`API fetch failed, falling back to config: ${message}`);
+
+      if (!options.silent) {
+        vscode.window.showWarningMessage(
+          `LLM Gateway: Failed to fetch models from API. Using configured models only.`
+        );
+      }
+
+      // Fallback to config
+      return this.buildModelInfoFromConfig(configuredModels, showProviderPrefix);
+    }
+  }
+
+  /**
+   * Process a message part using duck-typing
    */
   private processPartDuckTyped(
     part: unknown,
@@ -519,16 +681,18 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   }
 
   /**
-   * Calculate safe max output tokens based on input estimate
+   * Calculate safe max output tokens
    */
-  private calculateSafeMaxOutputTokens(estimatedInputTokens: number, toolsOverhead: number): number {
-    const modelMaxContext = this.config.defaultMaxTokens || 32768;
+  private calculateSafeMaxOutputTokens(estimatedInputTokens: number, toolsOverhead: number, modelId: string): number {
+    const resolvedModel = this.configManager.getModel(this.providerId, modelId);
+    const modelMaxContext = resolvedModel?.limit.context ?? this.gatewayConfig.defaultMaxTokens;
+    const defaultMaxOutput = resolvedModel?.limit.output ?? this.gatewayConfig.defaultMaxOutputTokens;
     const totalEstimatedTokens = estimatedInputTokens + toolsOverhead;
     const conservativeInputEstimate = Math.ceil(totalEstimatedTokens * 1.2);
     const bufferTokens = 256;
 
     let safeMaxOutputTokens = Math.min(
-      this.config.defaultMaxOutputTokens || 2048,
+      defaultMaxOutput,
       Math.floor(modelMaxContext - conservativeInputEstimate - bufferTokens)
     );
 
@@ -538,8 +702,13 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   /**
    * Build tools configuration for request
    */
-  private buildToolsConfig(options: vscode.ProvideLanguageModelChatResponseOptions): Record<string, unknown>[] | undefined {
-    if (!this.config.enableToolCalling || !options.tools || options.tools.length === 0) {
+  private buildToolsConfig(
+    options: vscode.ProvideLanguageModelChatResponseOptions,
+    modelCapabilities?: { toolCalling?: boolean }
+  ): Record<string, unknown>[] | undefined {
+    const supportsToolCalling = modelCapabilities?.toolCalling ?? this.gatewayConfig.enableToolCalling;
+
+    if (!supportsToolCalling || !options.tools || options.tools.length === 0) {
       return undefined;
     }
 
@@ -607,7 +776,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     progress: vscode.Progress<vscode.LanguageModelResponsePart>
   ): Promise<void> {
     const inputTokenCount = await this.provideTokenCount(model, inputText, token);
-    const modelMaxContext = this.config.defaultMaxTokens || 32768;
+    const resolvedModel = this.configManager.getModel(this.providerId, model.id);
+    const modelMaxContext = resolvedModel?.limit.context ?? this.gatewayConfig.defaultMaxTokens;
 
     this.outputChannel.appendLine(`WARNING: Model returned empty response with no tool calls.`);
     this.outputChannel.appendLine(`  Input tokens estimated: ${inputTokenCount}`);
@@ -647,25 +817,26 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       this.outputChannel.appendLine('The model may not support function calling properly.');
       this.outputChannel.appendLine('Try: 1) Using a different model, 2) Disabling tool calling in settings, or 3) Checking inference server logs');
 
+      const resolvedModel = this.configManager.getModel(this.providerId, '');
+
       vscode.window.showErrorMessage(
-        `GitHub Copilot LLM Gateway: Model failed to generate valid tool calls. This model may not support function calling. Check Output panel for details.`,
+        `LLM Gateway: Model failed to generate valid tool calls. This model may not support function calling. Check Output panel for details.`,
         'Open Output', 'Disable Tool Calling'
       ).then((selection: string | undefined) => {
         if (selection === 'Open Output') {
           this.outputChannel.show();
-        } else if (selection === 'Disable Tool Calling') {
-          vscode.workspace.getConfiguration('github.copilot.llm-gateway').update('enableToolCalling', false, vscode.ConfigurationTarget.Global);
         }
+        // Note: Disable tool calling is now per-model, would need to update config
       });
     } else {
-      vscode.window.showErrorMessage(`GitHub Copilot LLM Gateway: Chat request failed. ${errorMessage}`);
+      vscode.window.showErrorMessage(`LLM Gateway: Chat request failed. ${errorMessage}`);
     }
 
     throw error;
   }
 
   /**
-   * Provide language model chat response - streams responses from inference server
+   * Provide language model chat response
    */
   async provideLanguageModelChatResponse(
     model: vscode.LanguageModelChatInformation,
@@ -679,6 +850,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     this.outputChannel.appendLine(`Message count: ${messages.length}`);
 
     this.showWelcomeNotification(model.id);
+
+    // Get model-specific capabilities
+    const resolvedModel = this.configManager.getModel(this.providerId, model.id);
+    const modelCapabilities = resolvedModel?.capabilities;
 
     // Convert messages
     const openAIMessages: Record<string, unknown>[] = [];
@@ -695,8 +870,11 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     }
 
     // Calculate token limits and truncate
-    const modelMaxContext = this.config.defaultMaxTokens || 32768;
-    const desiredOutputTokens = Math.min(this.config.defaultMaxOutputTokens || 2048, Math.floor(modelMaxContext / 2));
+    const modelMaxContext = resolvedModel?.limit.context ?? this.gatewayConfig.defaultMaxTokens;
+    const desiredOutputTokens = Math.min(
+      resolvedModel?.limit.output ?? this.gatewayConfig.defaultMaxOutputTokens,
+      Math.floor(modelMaxContext / 2)
+    );
     const toolsTokenEstimate = options.tools ? Math.ceil(JSON.stringify(options.tools).length / 4 * 1.2) : 0;
     const maxInputTokens = modelMaxContext - desiredOutputTokens - toolsTokenEstimate - 256;
 
@@ -716,15 +894,16 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     const toolsOverhead = options.tools ? Math.ceil(JSON.stringify(options.tools).length / 4) : 0;
     const estimatedInputTokens = await this.provideTokenCount(model, inputText, token);
-    const safeMaxOutputTokens = this.calculateSafeMaxOutputTokens(estimatedInputTokens, toolsOverhead);
+    const safeMaxOutputTokens = this.calculateSafeMaxOutputTokens(estimatedInputTokens, toolsOverhead, model.id);
 
     this.outputChannel.appendLine(
       `Token estimate: input=${estimatedInputTokens}, tools=${toolsOverhead}, model_context=${modelMaxContext}, chosen_max_tokens=${safeMaxOutputTokens}`
     );
 
     // Build request
-    const hasTools = this.config.enableToolCalling && options.tools && options.tools.length > 0;
-    const temperature = hasTools ? (this.config.agentTemperature ?? 0) : 0.7;
+    const hasTools = (modelCapabilities?.toolCalling ?? this.gatewayConfig.enableToolCalling) &&
+                     options.tools && options.tools.length > 0;
+    const temperature = hasTools ? (this.gatewayConfig.agentTemperature ?? 0) : 0.7;
 
     const requestOptions: Record<string, unknown> = {
       model: model.id,
@@ -733,14 +912,14 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       temperature,
     };
 
-    const toolsConfig = this.buildToolsConfig(options);
+    const toolsConfig = this.buildToolsConfig(options, modelCapabilities);
     if (toolsConfig) {
       requestOptions.tools = toolsConfig;
       if (options.toolMode !== undefined) {
         requestOptions.tool_choice = options.toolMode === vscode.LanguageModelChatToolMode.Required ? 'required' : 'auto';
       }
-      requestOptions.parallel_tool_calls = this.config.parallelToolCalling;
-      this.outputChannel.appendLine(`Sending ${toolsConfig.length} tools to model (parallel: ${this.config.parallelToolCalling})`);
+      requestOptions.parallel_tool_calls = this.gatewayConfig.parallelToolCalling;
+      this.outputChannel.appendLine(`Sending ${toolsConfig.length} tools to model (parallel: ${this.gatewayConfig.parallelToolCalling})`);
     }
 
     if (options.modelOptions) {
@@ -755,7 +934,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       let totalContent = '';
       let totalToolCalls = 0;
 
-      for await (const chunk of this.client.streamChatCompletion(requestOptions as unknown as OpenAIChatCompletionRequest, token)) {
+      for await (const chunk of this.client.streamChatCompletion(requestOptions as OpenAIChatCompletionRequest, token)) {
         if (token.isCancellationRequested) { break; }
 
         if (chunk.content) {
@@ -774,7 +953,14 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       this.outputChannel.appendLine(`Completed chat request, received ${totalContent.length} characters, ${totalToolCalls} tool calls`);
 
       if (totalContent.length === 0 && totalToolCalls === 0) {
-        await this.handleEmptyResponse(model, inputText, openAIMessages.length, requestOptions.tools ? (requestOptions.tools as unknown[]).length : 0, token, progress);
+        await this.handleEmptyResponse(
+          model,
+          inputText,
+          openAIMessages.length,
+          requestOptions.tools ? (requestOptions.tools as unknown[]).length : 0,
+          token,
+          progress
+        );
       }
     } catch (error) {
       this.handleChatError(error);
@@ -790,7 +976,6 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     token: vscode.CancellationToken
   ): Promise<number> {
     // Simple approximation: ~4 characters per token
-    // This is a rough estimate; for more accuracy, could use tiktoken library
     let content: string;
 
     if (typeof text === 'string') {
@@ -827,14 +1012,15 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   }
 
   /**
-   * Load configuration from VS Code settings
+   * Load legacy GatewayConfig for client compatibility
+   * This will be replaced with per-provider config in future refactor
    */
-  private loadConfig(): GatewayConfig {
+  private loadLegacyConfig(): GatewayConfig {
     const config = vscode.workspace.getConfiguration('github.copilot.llm-gateway');
 
     const cfg: GatewayConfig = {
-      serverUrl: config.get<string>('serverUrl', 'http://localhost:8000'),
-      apiKey: config.get<string>('apiKey', ''),
+      serverUrl: this.providerConfig.baseURL,
+      apiKey: this.providerConfig.apiKey ?? '',
       requestTimeout: config.get<number>('requestTimeout', 60000),
       defaultMaxTokens: config.get<number>('defaultMaxTokens', 32768),
       defaultMaxOutputTokens: config.get<number>('defaultMaxOutputTokens', 4096),
@@ -861,23 +1047,11 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     if (cfg.defaultMaxOutputTokens >= cfg.defaultMaxTokens) {
       const adjusted = Math.max(64, cfg.defaultMaxTokens - 256);
       this.outputChannel.appendLine(
-        `WARNING: github.copilot.llm-gateway.defaultMaxOutputTokens (${cfg.defaultMaxOutputTokens}) >= defaultMaxTokens (${cfg.defaultMaxTokens}). Adjusting to ${adjusted}.`
-      );
-      vscode.window.showWarningMessage(
-        `GitHub Copilot LLM Gateway: 'defaultMaxOutputTokens' was >= 'defaultMaxTokens'. Adjusted to ${adjusted} to avoid request errors.`
+        `WARNING: defaultMaxOutputTokens (${cfg.defaultMaxOutputTokens}) >= defaultMaxTokens (${cfg.defaultMaxTokens}). Adjusting to ${adjusted}.`
       );
       cfg.defaultMaxOutputTokens = adjusted;
     }
 
     return cfg;
-  }
-
-  /**
-   * Reload configuration and update client
-   */
-  private reloadConfig(): void {
-    this.config = this.loadConfig();
-    this.client.updateConfig(this.config);
-    this.outputChannel.appendLine('Configuration reloaded');
   }
 }

@@ -458,24 +458,55 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     const configMode = this.configManager.getConfigMode();
     const showProviderPrefix = this.configManager.shouldShowProviderPrefix();
 
-    this.outputChannel.appendLine(`Fetching models for provider "${"default"}" (mode: ${configMode})...`);
+    this.outputChannel.appendLine(`Fetching models from all providers (mode: ${configMode})...`);
 
-    // Get configured models
-    const configuredModels = this.configManager.getModelsForProvider("default");
+    const allModels: vscode.LanguageModelChatInformation[] = [];
+    const providers = this.configManager.getProviders();
 
-    // Handle different config modes
+    for (const provider of providers) {
+      try {
+        const providerModels = await this.fetchModelsForProvider(
+          provider.id,
+          configMode,
+          showProviderPrefix,
+          options,
+          token
+        );
+        allModels.push(...providerModels);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.outputChannel.appendLine(`Failed to fetch models from provider "${provider.id}": ${message}`);
+      }
+    }
+
+    this.outputChannel.appendLine(`Found ${allModels.length} model(s) from all providers`);
+    return allModels;
+  }
+
+  /**
+   * Fetch models for a specific provider
+   */
+  private async fetchModelsForProvider(
+    providerId: string,
+    configMode: ConfigMode,
+    showProviderPrefix: boolean,
+    options: { silent: boolean; },
+    token: vscode.CancellationToken
+  ): Promise<vscode.LanguageModelChatInformation[]> {
+    const configuredModels = this.configManager.getModelsForProvider(providerId);
+
     switch (configMode) {
       case 'config-only':
-        return this.buildModelInfoFromConfig(configuredModels, showProviderPrefix);
+        return this.buildModelInfoFromConfig(providerId, configuredModels, showProviderPrefix);
 
       case 'config-priority':
-        return await this.fetchModelsWithConfigPriority(configuredModels, showProviderPrefix, options, token);
+        return await this.fetchModelsWithConfigPriority(providerId, configuredModels, showProviderPrefix, options, token);
 
       case 'api-priority':
-        return await this.fetchModelsWithApiPriority(configuredModels, showProviderPrefix, options, token);
+        return await this.fetchModelsWithApiPriority(providerId, configuredModels, showProviderPrefix, options, token);
 
       default:
-        return this.buildModelInfoFromConfig(configuredModels, showProviderPrefix);
+        return this.buildModelInfoFromConfig(providerId, configuredModels, showProviderPrefix);
     }
   }
 
@@ -483,13 +514,14 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
    * Build model info from configuration only
    */
   private buildModelInfoFromConfig(
+    providerId: string,
     models: ResolvedModel[],
     showProviderPrefix: boolean
   ): vscode.LanguageModelChatInformation[] {
     return models.map((model) => ({
-      id: model.id,
-      name: showProviderPrefix ? `${model.providerId}/${model.name}` : model.name,
-      family: 'llm-gateway',
+      id: `${providerId}-${model.id}`,
+      name: showProviderPrefix ? `${providerId}/${model.name}` : model.name,
+      family: providerId,
       maxInputTokens: model.limit.context,
       maxOutputTokens: model.limit.output,
       version: '1.0.0',
@@ -503,6 +535,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
    * Fetch models with config priority (config overrides API)
    */
   private async fetchModelsWithConfigPriority(
+    providerId: string,
     configuredModels: ResolvedModel[],
     showProviderPrefix: boolean,
     options: { silent: boolean; },
@@ -513,9 +546,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     for (const model of configuredModels) {
       modelMap.set(model.id, {
-        id: model.id,
-        name: showProviderPrefix ? `${model.providerId}/${model.name}` : model.name,
-        family: 'llm-gateway',
+        id: `${providerId}-${model.id}`,
+        name: showProviderPrefix ? `${providerId}/${model.name}` : model.name,
+        family: providerId,
         maxInputTokens: model.limit.context,
         maxOutputTokens: model.limit.output,
         version: '1.0.0',
@@ -527,7 +560,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     // Then try to fetch from API and merge
     try {
-      const response = await this.client.fetchModels();
+      const client = this.getClient(providerId);
+      const response = await client.fetchModels();
 
       for (const apiModel of response.data) {
         // If model already in config, keep config values (config priority)
@@ -537,9 +571,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           const defaultMaxOutput = this.gatewayConfig.defaultMaxOutputTokens;
 
           modelMap.set(apiModel.id, {
-            id: apiModel.id,
-            name: showProviderPrefix ? `${"default"}/${apiModel.id}` : apiModel.id,
-            family: 'llm-gateway',
+            id: `${providerId}-${apiModel.id}`,
+            name: showProviderPrefix ? `${providerId}/${apiModel.id}` : apiModel.id,
+            family: providerId,
             maxInputTokens: defaultMaxTokens,
             maxOutputTokens: defaultMaxOutput,
             version: '1.0.0',
@@ -560,9 +594,34 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   }
 
   /**
+   * Get or create client for a provider
+   */
+  private getClient(providerId: string): GatewayClient {
+    // Create new client for this provider
+    const provider = this.configManager.getProvider(providerId);
+    if (!provider) {
+      throw new Error(`Provider "${providerId}" not found`);
+    }
+
+    const gatewayConfig: GatewayConfig = {
+      serverUrl: provider.baseURL,
+      apiKey: provider.apiKey ?? '',
+      requestTimeout: this.gatewayConfig.requestTimeout,
+      defaultMaxTokens: this.gatewayConfig.defaultMaxTokens,
+      defaultMaxOutputTokens: this.gatewayConfig.defaultMaxOutputTokens,
+      enableToolCalling: this.gatewayConfig.enableToolCalling,
+      parallelToolCalling: this.gatewayConfig.parallelToolCalling,
+      agentTemperature: this.gatewayConfig.agentTemperature,
+    };
+
+    return new GatewayClient(gatewayConfig);
+  }
+
+  /**
    * Fetch models with API priority (API overrides config for existing models)
    */
   private async fetchModelsWithApiPriority(
+    providerId: string,
     configuredModels: ResolvedModel[],
     showProviderPrefix: boolean,
     options: { silent: boolean; },
@@ -576,7 +635,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     }
 
     try {
-      const response = await this.client.fetchModels();
+      const client = this.getClient(providerId);
+      const response = await client.fetchModels();
       const result: vscode.LanguageModelChatInformation[] = [];
 
       for (const apiModel of response.data) {
@@ -584,11 +644,11 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
         // API priority: use API model id, but config values if available
         result.push({
-          id: apiModel.id,
+          id: `${providerId}-${apiModel.id}`,
           name: showProviderPrefix
-            ? `${"default"}/${configuredModel?.name ?? apiModel.id}`
+            ? `${providerId}/${configuredModel?.name ?? apiModel.id}`
             : (configuredModel?.name ?? apiModel.id),
-          family: 'llm-gateway',
+          family: providerId,
           maxInputTokens: configuredModel?.limit.context ?? this.gatewayConfig.defaultMaxTokens,
           maxOutputTokens: configuredModel?.limit.output ?? this.gatewayConfig.defaultMaxOutputTokens,
           version: '1.0.0',
@@ -611,7 +671,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       }
 
       // Fallback to config
-      return this.buildModelInfoFromConfig(configuredModels, showProviderPrefix);
+      return this.buildModelInfoFromConfig(providerId, configuredModels, showProviderPrefix);
     }
   }
 

@@ -44,12 +44,6 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
-    "languageModelChatProviders": [
-      {
-        "vendor": "copilot-llm-gateway",
-        "displayName": "LLM Gateway"
-      }
-    ],
     "commands": [
       {
         "command": "github.copilot.llm-gateway.testConnection",

@@ -50,6 +50,22 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   }
 
   /**
+   * Find provider and model config by model ID
+   */
+  private findModelAndProvider(modelId: string): { providerId: string; model: ResolvedModel } | undefined {
+    const providers = this.configManager.getProviders();
+
+    for (const provider of providers) {
+      const model = this.configManager.getModel(provider.id, modelId);
+      if (model) {
+        return { providerId: provider.id, model };
+      }
+    }
+
+    return undefined;
+  }
+
+  /**
    * Map VS Code message role to OpenAI role string
    */
   private mapRole(role: vscode.LanguageModelChatMessageRole): string {
@@ -130,7 +146,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     estimatedInputTokens: number
   ): any {
     // Get model-specific limits from config
-    const resolvedModel = this.configManager.getModel("default", model.id);
+    const modelAndProvider = this.findModelAndProvider(model.id);
+    const resolvedModel = modelAndProvider?.model;
     const modelMaxContext = resolvedModel?.limit.context ?? this.gatewayConfig.defaultMaxTokens;
     const bufferTokens = 128;
     let safeMaxOutputTokens = Math.min(
@@ -519,14 +536,15 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     showProviderPrefix: boolean
   ): vscode.LanguageModelChatInformation[] {
     return models.map((model) => ({
-      id: `${providerId}-${model.id}`,
-      name: showProviderPrefix ? `${providerId}/${model.name}` : model.name,
-      family: providerId,
+      id: model.id,
+      name: showProviderPrefix ? `[${providerId}] ${model.name}` : model.name,
+      family: 'llm-gateway',
       maxInputTokens: model.limit.context,
       maxOutputTokens: model.limit.output,
-      version: '1.0.0',
+      version: '',
       capabilities: {
         toolCalling: model.capabilities?.toolCalling ?? true,
+        imageInput: model.capabilities?.vision ?? false,
       },
     }));
   }
@@ -546,14 +564,15 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     for (const model of configuredModels) {
       modelMap.set(model.id, {
-        id: `${providerId}-${model.id}`,
-        name: showProviderPrefix ? `${providerId}/${model.name}` : model.name,
-        family: providerId,
+        id: model.id,
+        name: showProviderPrefix ? `[${providerId}] ${model.name}` : model.name,
+        family: 'llm-gateway',
         maxInputTokens: model.limit.context,
         maxOutputTokens: model.limit.output,
-        version: '1.0.0',
+        version: '',
         capabilities: {
           toolCalling: model.capabilities?.toolCalling ?? true,
+          imageInput: model.capabilities?.vision ?? false,
         },
       });
     }
@@ -571,14 +590,15 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           const defaultMaxOutput = this.gatewayConfig.defaultMaxOutputTokens;
 
           modelMap.set(apiModel.id, {
-            id: `${providerId}-${apiModel.id}`,
-            name: showProviderPrefix ? `${providerId}/${apiModel.id}` : apiModel.id,
-            family: providerId,
+            id: apiModel.id,
+            name: showProviderPrefix ? `[${providerId}] ${apiModel.id}` : apiModel.id,
+            family: 'llm-gateway',
             maxInputTokens: defaultMaxTokens,
             maxOutputTokens: defaultMaxOutput,
-            version: '1.0.0',
+            version: '',
             capabilities: {
               toolCalling: this.gatewayConfig.enableToolCalling,
+              imageInput: false,
             },
           });
         }
@@ -644,16 +664,17 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
         // API priority: use API model id, but config values if available
         result.push({
-          id: `${providerId}-${apiModel.id}`,
+          id: apiModel.id,
           name: showProviderPrefix
-            ? `${providerId}/${configuredModel?.name ?? apiModel.id}`
+            ? `[${providerId}] ${configuredModel?.name ?? apiModel.id}`
             : (configuredModel?.name ?? apiModel.id),
-          family: providerId,
+          family: 'llm-gateway',
           maxInputTokens: configuredModel?.limit.context ?? this.gatewayConfig.defaultMaxTokens,
           maxOutputTokens: configuredModel?.limit.output ?? this.gatewayConfig.defaultMaxOutputTokens,
-          version: '1.0.0',
+          version: '',
           capabilities: {
             toolCalling: configuredModel?.capabilities?.toolCalling ?? this.gatewayConfig.enableToolCalling,
+            imageInput: configuredModel?.capabilities?.vision ?? false,
           },
         });
       }
@@ -739,7 +760,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
    * Calculate safe max output tokens
    */
   private calculateSafeMaxOutputTokens(estimatedInputTokens: number, toolsOverhead: number, modelId: string): number {
-    const resolvedModel = this.configManager.getModel("default", modelId);
+    const modelAndProvider = this.findModelAndProvider(modelId);
+    const resolvedModel = modelAndProvider?.model;
     const modelMaxContext = resolvedModel?.limit.context ?? this.gatewayConfig.defaultMaxTokens;
     const defaultMaxOutput = resolvedModel?.limit.output ?? this.gatewayConfig.defaultMaxOutputTokens;
     const totalEstimatedTokens = estimatedInputTokens + toolsOverhead;
@@ -831,7 +853,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     progress: vscode.Progress<vscode.LanguageModelResponsePart>
   ): Promise<void> {
     const inputTokenCount = await this.provideTokenCount(model, inputText, token);
-    const resolvedModel = this.configManager.getModel("default", model.id);
+    const modelAndProvider = this.findModelAndProvider(model.id);
+    const resolvedModel = modelAndProvider?.model;
     const modelMaxContext = resolvedModel?.limit.context ?? this.gatewayConfig.defaultMaxTokens;
 
     this.outputChannel.appendLine(`WARNING: Model returned empty response with no tool calls.`);
@@ -872,8 +895,6 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       this.outputChannel.appendLine('The model may not support function calling properly.');
       this.outputChannel.appendLine('Try: 1) Using a different model, 2) Disabling tool calling in settings, or 3) Checking inference server logs');
 
-      const resolvedModel = this.configManager.getModel("default", '');
-
       vscode.window.showErrorMessage(
         `LLM Gateway: Model failed to generate valid tool calls. This model may not support function calling. Check Output panel for details.`,
         'Open Output', 'Disable Tool Calling'
@@ -906,9 +927,17 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     this.showWelcomeNotification(model.id);
 
-    // Get model-specific capabilities
-    const resolvedModel = this.configManager.getModel("default", model.id);
+    // Find model and its provider
+    const modelAndProvider = this.findModelAndProvider(model.id);
+    if (!modelAndProvider) {
+      throw new Error(`Model "${model.id}" not found in any provider configuration`);
+    }
+
+    const { providerId, model: resolvedModel } = modelAndProvider;
     const modelCapabilities = resolvedModel?.capabilities;
+
+    // Get the client for this provider
+    const client = this.getClient(providerId);
 
     // Convert messages
     const openAIMessages: Record<string, unknown>[] = [];
@@ -989,7 +1018,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       let totalContent = '';
       let totalToolCalls = 0;
 
-      for await (const chunk of this.client.streamChatCompletion(requestOptions as unknown as OpenAIChatCompletionRequest, token)) {
+      for await (const chunk of client.streamChatCompletion(requestOptions as unknown as OpenAIChatCompletionRequest, token)) {
         if (token.isCancellationRequested) { break; }
 
         if (chunk.content) {

@@ -47,20 +47,13 @@ function registerCommands(
   const testCommand = vscode.commands.registerCommand(
     'github.copilot.llm-gateway.testConnection',
     async () => {
-      const providers = providerManager.getRegisteredProviderIds();
-      if (providers.length === 0) {
-        vscode.window.showErrorMessage(
-          'LLM Gateway: No providers configured. Please add providers in settings.'
-        );
-        return;
-      }
-
-      // Test first provider
-      const providerId = providers[0];
       try {
-        const provider = providerManager.getProvider(providerId);
+        const provider = providerManager.getProvider();
         if (!provider) {
-          throw new Error(`Provider "${providerId}" not found`);
+          vscode.window.showErrorMessage(
+            'LLM Gateway: Provider not initialized. Please check configuration.'
+          );
+          return;
         }
 
         const models = await provider.provideLanguageModelChatInformation(
@@ -70,16 +63,16 @@ function registerCommands(
 
         if (models.length > 0) {
           vscode.window.showInformationMessage(
-            `LLM Gateway (${providerId}): Successfully connected! Found ${models.length} model(s).`
+            `LLM Gateway: Successfully connected! Found ${models.length} model(s).`
           );
         } else {
           vscode.window.showWarningMessage(
-            `LLM Gateway (${providerId}): Connected but no models found.`
+            'LLM Gateway: Connected but no models found. Check your configuration.'
           );
         }
       } catch (error) {
         vscode.window.showErrorMessage(
-          `LLM Gateway (${providerId}): Connection test failed. ${error instanceof Error ? error.message : String(error)}`
+          `LLM Gateway: Connection test failed. ${error instanceof Error ? error.message : String(error)}`
         );
       }
     }

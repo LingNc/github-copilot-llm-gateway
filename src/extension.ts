@@ -1,27 +1,67 @@
 import * as vscode from 'vscode';
-import { GatewayProvider } from './provider';
+import { ProviderManager } from './manager';
+import { ConfigManager } from './config/ConfigManager';
 
 /**
  * Extension activation
  */
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext) {
   console.log('GitHub Copilot LLM Gateway extension is now active');
 
-  // Create and register the language model provider
-  const provider = new GatewayProvider(context);
+  const outputChannel = vscode.window.createOutputChannel('GitHub Copilot LLM Gateway');
+  outputChannel.appendLine('Extension activating...');
 
-  const disposable = vscode.lm.registerLanguageModelChatProvider(
-    'copilot-llm-gateway',
-    provider
-  );
+  // Create ProviderManager
+  const providerManager = new ProviderManager(context, outputChannel);
 
-  context.subscriptions.push(disposable);
+  // Initialize and register all providers
+  await providerManager.initialize();
 
-  // Register a command to test the connection
+  // Store for disposal
+  context.subscriptions.push({
+    dispose: () => {
+      providerManager.dispose();
+      outputChannel.dispose();
+    }
+  });
+
+  // Register commands
+  registerCommands(context, providerManager, outputChannel);
+
+  console.log('Copilot LLM Gateway extension activated successfully');
+  outputChannel.appendLine('Extension activated successfully');
+}
+
+/**
+ * Register all commands
+ */
+function registerCommands(
+  context: vscode.ExtensionContext,
+  providerManager: ProviderManager,
+  outputChannel: vscode.OutputChannel
+): void {
+  const configManager = providerManager.getConfigManager();
+
+  // Test connection command
   const testCommand = vscode.commands.registerCommand(
     'github.copilot.llm-gateway.testConnection',
     async () => {
+      const providers = providerManager.getRegisteredProviderIds();
+      if (providers.length === 0) {
+        vscode.window.showErrorMessage(
+          'LLM Gateway: No providers configured. Please add providers in settings.'
+        );
+        return;
+      }
+
+      // Test first provider
+      const providerId = providers[0];
       try {
+        const provider = providerManager.getProvider(providerId);
+        if (!provider) {
+          throw new Error(`Provider "${providerId}" not found`);
+        }
+
         const models = await provider.provideLanguageModelChatInformation(
           { silent: false },
           new vscode.CancellationTokenSource().token
@@ -29,24 +69,42 @@ export function activate(context: vscode.ExtensionContext) {
 
         if (models.length > 0) {
           vscode.window.showInformationMessage(
-            `GitHub Copilot LLM Gateway: Successfully connected! Found ${models.length} model(s): ${models.map(m => m.name).join(', ')}`
+            `LLM Gateway (${providerId}): Successfully connected! Found ${models.length} model(s).`
           );
         } else {
           vscode.window.showWarningMessage(
-            'GitHub Copilot LLM Gateway: Connected but no models found.'
+            `LLM Gateway (${providerId}): Connected but no models found.`
           );
         }
       } catch (error) {
         vscode.window.showErrorMessage(
-          `GitHub Copilot LLM Gateway: Connection test failed. ${error instanceof Error ? error.message : String(error)}`
+          `LLM Gateway (${providerId}): Connection test failed. ${error instanceof Error ? error.message : String(error)}`
         );
       }
     }
   );
-
   context.subscriptions.push(testCommand);
 
-  console.log('Copilot LLM Gateway provider registered with vendor ID: copilot-llm-gateway');
+  // Open configuration command
+  const openConfigCommand = vscode.commands.registerCommand(
+    'github.copilot.llm-gateway.openConfig',
+    async () => {
+      await configManager.openConfiguration();
+    }
+  );
+  context.subscriptions.push(openConfigCommand);
+
+  // Reload configuration command
+  const reloadConfigCommand = vscode.commands.registerCommand(
+    'github.copilot.llm-gateway.reloadConfig',
+    async () => {
+      await providerManager.reload();
+      vscode.window.showInformationMessage('LLM Gateway: Configuration reloaded.');
+    }
+  );
+  context.subscriptions.push(reloadConfigCommand);
+
+  outputChannel.appendLine(`Registered ${context.subscriptions.length} commands`);
 }
 
 /**

@@ -934,7 +934,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       let totalContent = '';
       let totalToolCalls = 0;
 
-      for await (const chunk of this.client.streamChatCompletion(requestOptions as OpenAIChatCompletionRequest, token)) {
+      for await (const chunk of this.client.streamChatCompletion(requestOptions as unknown as OpenAIChatCompletionRequest, token)) {
         if (token.isCancellationRequested) { break; }
 
         if (chunk.content) {

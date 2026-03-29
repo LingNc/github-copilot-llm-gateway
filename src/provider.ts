@@ -130,7 +130,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     estimatedInputTokens: number
   ): any {
     // Get model-specific limits from config
-    const resolvedModel = this.configManager.getModel(this.providerId, model.id);
+    const resolvedModel = this.configManager.getModel("default", model.id);
     const modelMaxContext = resolvedModel?.limit.context ?? this.gatewayConfig.defaultMaxTokens;
     const bufferTokens = 128;
     let safeMaxOutputTokens = Math.min(
@@ -458,10 +458,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     const configMode = this.configManager.getConfigMode();
     const showProviderPrefix = this.configManager.shouldShowProviderPrefix();
 
-    this.outputChannel.appendLine(`Fetching models for provider "${this.providerId}" (mode: ${configMode})...`);
+    this.outputChannel.appendLine(`Fetching models for provider "${"default"}" (mode: ${configMode})...`);
 
     // Get configured models
-    const configuredModels = this.configManager.getModelsForProvider(this.providerId);
+    const configuredModels = this.configManager.getModelsForProvider("default");
 
     // Handle different config modes
     switch (configMode) {
@@ -538,7 +538,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
           modelMap.set(apiModel.id, {
             id: apiModel.id,
-            name: showProviderPrefix ? `${this.providerId}/${apiModel.id}` : apiModel.id,
+            name: showProviderPrefix ? `${"default"}/${apiModel.id}` : apiModel.id,
             family: 'llm-gateway',
             maxInputTokens: defaultMaxTokens,
             maxOutputTokens: defaultMaxOutput,
@@ -586,7 +586,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         result.push({
           id: apiModel.id,
           name: showProviderPrefix
-            ? `${this.providerId}/${configuredModel?.name ?? apiModel.id}`
+            ? `${"default"}/${configuredModel?.name ?? apiModel.id}`
             : (configuredModel?.name ?? apiModel.id),
           family: 'llm-gateway',
           maxInputTokens: configuredModel?.limit.context ?? this.gatewayConfig.defaultMaxTokens,
@@ -679,7 +679,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
    * Calculate safe max output tokens
    */
   private calculateSafeMaxOutputTokens(estimatedInputTokens: number, toolsOverhead: number, modelId: string): number {
-    const resolvedModel = this.configManager.getModel(this.providerId, modelId);
+    const resolvedModel = this.configManager.getModel("default", modelId);
     const modelMaxContext = resolvedModel?.limit.context ?? this.gatewayConfig.defaultMaxTokens;
     const defaultMaxOutput = resolvedModel?.limit.output ?? this.gatewayConfig.defaultMaxOutputTokens;
     const totalEstimatedTokens = estimatedInputTokens + toolsOverhead;
@@ -771,7 +771,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     progress: vscode.Progress<vscode.LanguageModelResponsePart>
   ): Promise<void> {
     const inputTokenCount = await this.provideTokenCount(model, inputText, token);
-    const resolvedModel = this.configManager.getModel(this.providerId, model.id);
+    const resolvedModel = this.configManager.getModel("default", model.id);
     const modelMaxContext = resolvedModel?.limit.context ?? this.gatewayConfig.defaultMaxTokens;
 
     this.outputChannel.appendLine(`WARNING: Model returned empty response with no tool calls.`);
@@ -812,7 +812,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       this.outputChannel.appendLine('The model may not support function calling properly.');
       this.outputChannel.appendLine('Try: 1) Using a different model, 2) Disabling tool calling in settings, or 3) Checking inference server logs');
 
-      const resolvedModel = this.configManager.getModel(this.providerId, '');
+      const resolvedModel = this.configManager.getModel("default", '');
 
       vscode.window.showErrorMessage(
         `LLM Gateway: Model failed to generate valid tool calls. This model may not support function calling. Check Output panel for details.`,
@@ -847,7 +847,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     this.showWelcomeNotification(model.id);
 
     // Get model-specific capabilities
-    const resolvedModel = this.configManager.getModel(this.providerId, model.id);
+    const resolvedModel = this.configManager.getModel("default", model.id);
     const modelCapabilities = resolvedModel?.capabilities;
 
     // Convert messages

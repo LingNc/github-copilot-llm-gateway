@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { ProviderManager } from './manager';
 import { ConfigManager } from './config/ConfigManager';
+import { registerConfigCommands } from './commands';
 
 /**
  * Extension activation
@@ -104,7 +105,10 @@ function registerCommands(
   );
   context.subscriptions.push(reloadConfigCommand);
 
-  outputChannel.appendLine(`Registered ${context.subscriptions.length} commands`);
+  // Register config management commands
+  registerConfigCommands(context, configManager);
+
+  outputChannel.appendLine(`Registered commands`);
 }
 
 /**

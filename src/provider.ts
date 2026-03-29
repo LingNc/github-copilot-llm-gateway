@@ -22,8 +22,6 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   private gatewayConfig: GatewayConfig;
   private readonly outputChannel: vscode.OutputChannel;
   private configManager: ConfigManager;
-  private providerId: string;
-  private providerConfig: { baseURL: string; apiKey?: string };
   // Store tool schemas for the current request to fill missing required properties
   private readonly currentToolSchemas: Map<string, unknown> = new Map();
   // Track if we've shown the welcome notification this session
@@ -31,27 +29,24 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
   constructor(
     context: vscode.ExtensionContext,
-    configManager: ConfigManager,
-    providerId: string
+    configManager: ConfigManager
   ) {
     this.configManager = configManager;
-    this.providerId = providerId;
     this.outputChannel = vscode.window.createOutputChannel('GitHub Copilot LLM Gateway');
 
-    // Get provider configuration
-    const provider = this.configManager.getProvider(providerId);
-    if (!provider) {
-      throw new Error(`Provider "${providerId}" not found in configuration`);
-    }
-
-    this.providerConfig = {
-      baseURL: provider.baseURL,
-      apiKey: provider.apiKey,
-    };
-
-    // Load legacy GatewayConfig for client compatibility
-    this.gatewayConfig = this.loadLegacyConfig();
+    // Load default config from first provider or global settings
+    this.gatewayConfig = this.loadDefaultConfig();
     this.client = new GatewayClient(this.gatewayConfig);
+
+    // Watch for configuration changes
+    context.subscriptions.push(
+      vscode.workspace.onDidChangeConfiguration((e: vscode.ConfigurationChangeEvent) => {
+        if (e.affectsConfiguration('github.copilot.llm-gateway')) {
+          this.outputChannel.appendLine('Configuration changed, reloading...');
+          this.reloadConfig();
+        }
+      })
+    );
   }
 
   /**
@@ -1015,12 +1010,22 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
    * Load legacy GatewayConfig for client compatibility
    * This will be replaced with per-provider config in future refactor
    */
-  private loadLegacyConfig(): GatewayConfig {
+  private loadDefaultConfig(): GatewayConfig {
     const config = vscode.workspace.getConfiguration('github.copilot.llm-gateway');
 
+    // Try to get config from first provider
+    const providers = this.configManager.getProviders();
+    let baseURL = config.get<string>('serverUrl', 'http://localhost:8000');
+    let apiKey = config.get<string>('apiKey', '');
+
+    if (providers.length > 0) {
+      baseURL = providers[0].baseURL;
+      apiKey = providers[0].apiKey ?? '';
+    }
+
     const cfg: GatewayConfig = {
-      serverUrl: this.providerConfig.baseURL,
-      apiKey: this.providerConfig.apiKey ?? '',
+      serverUrl: baseURL,
+      apiKey: apiKey,
       requestTimeout: config.get<number>('requestTimeout', 60000),
       defaultMaxTokens: config.get<number>('defaultMaxTokens', 32768),
       defaultMaxOutputTokens: config.get<number>('defaultMaxOutputTokens', 4096),
@@ -1053,5 +1058,14 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     }
 
     return cfg;
+  }
+
+  /**
+   * Reload configuration
+   */
+  private reloadConfig(): void {
+    this.gatewayConfig = this.loadDefaultConfig();
+    this.client.updateConfig(this.gatewayConfig);
+    this.outputChannel.appendLine('Configuration reloaded');
   }
 }

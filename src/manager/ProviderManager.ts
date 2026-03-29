@@ -1,31 +1,23 @@
 /**
  * Provider Manager
- * Manages multiple GatewayProvider instances for multi-provider support
+ * Manages a single GatewayProvider that handles all configured providers
  */
 
 import * as vscode from 'vscode';
 import { ConfigManager } from '../config/ConfigManager';
 import { GatewayProvider } from '../provider';
-import { MultiProviderConfig, ResolvedProvider } from '../config/types';
-
-/**
- * Provider registration info
- */
-interface ProviderRegistration {
-  provider: GatewayProvider;
-  disposable: vscode.Disposable;
-  providerId: string;
-}
+import { MultiProviderConfig } from '../config/types';
 
 /**
  * Provider Manager class
- * Handles registration and lifecycle of multiple GatewayProvider instances
+ * Handles registration of a single GatewayProvider that manages all configured providers
  */
 export class ProviderManager {
   private configManager: ConfigManager;
   private outputChannel: vscode.OutputChannel;
   private context: vscode.ExtensionContext;
-  private registrations: Map<string, ProviderRegistration> = new Map();
+  private providerDisposable?: vscode.Disposable;
+  private provider?: GatewayProvider;
 
   constructor(
     context: vscode.ExtensionContext,
@@ -42,44 +34,42 @@ export class ProviderManager {
   }
 
   /**
-   * Initialize and register all providers
+   * Initialize and register the provider
    */
   public async initialize(): Promise<void> {
     this.outputChannel.appendLine('Initializing Provider Manager...');
 
-    const config = this.configManager.getConfig();
-    await this.registerAllProviders(config);
+    await this.registerProvider();
 
     this.outputChannel.appendLine('Provider Manager initialized.');
   }
 
   /**
-   * Dispose all providers
+   * Dispose provider
    */
   public dispose(): void {
-    this.outputChannel.appendLine('Disposing all providers...');
+    this.outputChannel.appendLine('Disposing provider...');
 
-    for (const [providerId, registration] of this.registrations) {
-      registration.disposable.dispose();
-      this.outputChannel.appendLine(`Provider "${providerId}" unregistered.`);
+    if (this.providerDisposable) {
+      this.providerDisposable.dispose();
+      this.providerDisposable = undefined;
     }
 
-    this.registrations.clear();
-    this.outputChannel.appendLine('All providers disposed.');
+    this.outputChannel.appendLine('Provider disposed.');
   }
 
   /**
-   * Reload configuration and re-register providers
+   * Reload configuration and re-register provider
    */
   public async reload(): Promise<void> {
-    this.outputChannel.appendLine('Reloading providers...');
+    this.outputChannel.appendLine('Reloading provider...');
 
-    // Dispose existing providers
+    // Dispose existing provider
     this.dispose();
 
     // Reload config and re-register
     const result = this.configManager.reloadConfig();
-    await this.registerAllProviders(result.config);
+    await this.registerProvider();
 
     if (result.migrated) {
       this.outputChannel.appendLine('Configuration migrated from legacy format.');
@@ -89,7 +79,7 @@ export class ProviderManager {
       this.outputChannel.appendLine(`Warning: ${warning}`);
     }
 
-    this.outputChannel.appendLine('Providers reloaded.');
+    this.outputChannel.appendLine('Provider reloaded.');
   }
 
   /**
@@ -100,39 +90,24 @@ export class ProviderManager {
   }
 
   /**
-   * Get all registered provider IDs
+   * Get the registered provider
    */
-  public getRegisteredProviderIds(): string[] {
-    return Array.from(this.registrations.keys());
-  }
-
-  /**
-   * Check if a provider is registered
-   */
-  public isProviderRegistered(providerId: string): boolean {
-    return this.registrations.has(providerId);
-  }
-
-  /**
-   * Get a specific provider
-   */
-  public getProvider(providerId: string): GatewayProvider | undefined {
-    const registration = this.registrations.get(providerId);
-    return registration?.provider;
+  public getProvider(): GatewayProvider | undefined {
+    return this.provider;
   }
 
   /**
    * Handle configuration changes
    */
   private async handleConfigChange(config: MultiProviderConfig): Promise<void> {
-    this.outputChannel.appendLine('Configuration changed, updating providers...');
+    this.outputChannel.appendLine('Configuration changed, updating provider...');
     await this.reload();
   }
 
   /**
-   * Register all providers from configuration
+   * Register the provider
    */
-  private async registerAllProviders(config: MultiProviderConfig): Promise<void> {
+  private async registerProvider(): Promise<void> {
     const providers = this.configManager.getProviders();
 
     if (providers.length === 0) {
@@ -148,70 +123,28 @@ export class ProviderManager {
       return;
     }
 
-    for (const provider of providers) {
-      await this.registerProvider(provider);
-    }
-
-    this.outputChannel.appendLine(`Registered ${this.registrations.size} provider(s).`);
-  }
-
-  /**
-   * Register a single provider
-   */
-  private async registerProvider(resolvedProvider: ResolvedProvider): Promise<void> {
-    const providerId = resolvedProvider.id;
-
     try {
-      // Check if already registered
-      if (this.registrations.has(providerId)) {
-        this.outputChannel.appendLine(`Provider "${providerId}" already registered, skipping.`);
-        return;
-      }
-
       // Create GatewayProvider instance
-      const provider = new GatewayProvider(
+      this.provider = new GatewayProvider(
         this.context,
-        this.configManager,
-        providerId
+        this.configManager
       );
 
-      // Register with VS Code - use fixed vendor ID with provider suffix
-      const vendorId = `llm-gateway-${providerId}`;
-      const disposable = vscode.lm.registerLanguageModelChatProvider(
-        vendorId,
-        provider
+      // Register with VS Code - use the vendor ID declared in package.json
+      this.providerDisposable = vscode.lm.registerLanguageModelChatProvider(
+        'llm-gateway',
+        this.provider
       );
-
-      // Store registration
-      this.registrations.set(providerId, {
-        provider,
-        disposable,
-        providerId,
-      });
 
       this.outputChannel.appendLine(
-        `Provider "${providerId}" (${resolvedProvider.name}) registered successfully.`
+        `Provider "llm-gateway" registered with ${providers.length} provider(s).`
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.outputChannel.appendLine(`Failed to register provider "${providerId}": ${message}`);
+      this.outputChannel.appendLine(`Failed to register provider: ${message}`);
       vscode.window.showErrorMessage(
-        `LLM Gateway: Failed to register provider "${providerId}". ${message}`
+        `LLM Gateway: Failed to register provider. ${message}`
       );
     }
-  }
-
-  /**
-   * Unregister a single provider
-   */
-  private unregisterProvider(providerId: string): void {
-    const registration = this.registrations.get(providerId);
-    if (!registration) {
-      return;
-    }
-
-    registration.disposable.dispose();
-    this.registrations.delete(providerId);
-    this.outputChannel.appendLine(`Provider "${providerId}" unregistered.`);
   }
 }

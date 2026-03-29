@@ -23,9 +23,6 @@ interface ToolCallState {
   finalizedIndices: Set<number>;
   requestId: string;
   toolCallCounter: number;
-
-  // Add error handling for SSE events
-  handleSSEError(error: Error): void;
 }
 
 /**

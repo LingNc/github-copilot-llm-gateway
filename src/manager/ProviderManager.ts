@@ -175,9 +175,10 @@ export class ProviderManager {
         providerId
       );
 
-      // Register with VS Code
+      // Register with VS Code - use fixed vendor ID with provider suffix
+      const vendorId = `llm-gateway-${providerId}`;
       const disposable = vscode.lm.registerLanguageModelChatProvider(
-        providerId,
+        vendorId,
         provider
       );
 

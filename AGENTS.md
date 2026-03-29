@@ -55,25 +55,37 @@ npm run package
 - [x] Token 计算和上下文截断
 - [x] JSON 修复和工具参数补全
 - [x] 连接测试命令
+- [x] 多厂商配置系统
+- [x] 配置文件支持和热重载
+- [x] 中英双语支持
+- [ ] 完整测试和 bug 修复
 
 ### 最新进度
-项目已完成基础功能开发，支持：
-- 连接到 OpenAI 兼容的推理服务器
-- 模型列表自动获取
-- 流式聊天响应
-- 工具/函数调用
-- 并行工具调用
-- 配置项动态更新
+项目已重构为支持多厂商配置系统：
+- 支持配置多个不同 baseURL 的厂商
+- 支持自定义模型详细信息（上下文、输出、模态、推理能力等）
+- 支持不支持 `/v1/models` 的 API 节点（纯配置模式）
+- 多厂商实例同时注册到 VS Code
+- 中英双语界面支持
+- 向后兼容旧配置
 
 ### 文件清单
 | 文件 | 说明 |
 |------|------|
-| `src/extension.ts` | 扩展入口，注册语言模型提供程序和命令 |
-| `src/provider.ts` | GatewayProvider 类，实现 VS Code LanguageModelChatProvider 接口 |
+| `src/extension.ts` | 扩展入口，使用 ProviderManager 管理多厂商 |
+| `src/provider.ts` | GatewayProvider 类，支持 ConfigMode 模型获取 |
 | `src/client.ts` | GatewayClient 类，处理 HTTP 请求和 SSE 流解析 |
-| `src/types.ts` | TypeScript 类型定义（OpenAI API 兼容格式） |
+| `src/types.ts` | TypeScript 类型定义，包含多厂商配置类型 |
+| `src/config/types.ts` | 配置专用类型定义 |
+| `src/config/ConfigManager.ts` | 配置管理器，支持加载、验证、热重载 |
+| `src/config/validator.ts` | 配置验证工具 |
+| `src/config/migration.ts` | 旧配置迁移工具 |
+| `src/manager/ProviderManager.ts` | 多厂商管理器 |
+| `src/commands/configCommands.ts` | 配置管理命令（添加/编辑/删除厂商） |
+| `schemas/config-schema.json` | 配置验证的 JSON Schema |
+| `package.nls.json` | 英文翻译 |
+| `package.nls.zh-cn.json` | 简体中文翻译 |
 | `package.json` | 扩展配置、命令、设置项定义 |
-| `tsconfig.json` | TypeScript 编译配置 |
 
 ### 参考文档
 - [VS Code Language Model API](https://code.visualstudio.com/api/extension-guides/language-model)
@@ -107,18 +119,47 @@ OpenAI Compatible Server (vLLM/Ollama/etc)
 
 ## 配置说明
 
-扩展提供以下配置项（在 VS Code 设置中搜索 "GitHub Copilot LLM Gateway"）：
+### 多厂商配置
 
-| 配置项 | 默认值 | 说明 |
-|--------|--------|------|
-| `serverUrl` | `http://localhost:8000` | 推理服务器地址 |
-| `apiKey` | `""` | API 认证密钥（可选） |
-| `requestTimeout` | `60000` | 请求超时（毫秒） |
-| `defaultMaxTokens` | `32768` | 模型最大上下文 Token 数 |
-| `defaultMaxOutputTokens` | `4096` | 最大输出 Token 数 |
-| `enableToolCalling` | `true` | 启用工具调用功能 |
-| `parallelToolCalling` | `true` | 允许并行工具调用 |
-| `agentTemperature` | `0.0` | Agent 模式温度参数（越低越稳定） |
+扩展现在支持多厂商配置，通过 `github.copilot.llm-gateway.providers` 设置：
+
+```json
+{
+  "github.copilot.llm-gateway.providers": {
+    "bailian-coding": {
+      "name": "阿里云百炼",
+      "baseURL": "https://coding.dashscope.aliyuncs.com/apps/anthropic/v1",
+      "apiKey": "YOUR_API_KEY",
+      "models": {
+        "qwen3.5-plus": {
+          "name": "Qwen3.5 Plus",
+          "modalities": { "input": ["text", "image"], "output": ["text"] },
+          "options": { "thinking": { "type": "enabled", "budgetTokens": 8192 } },
+          "limit": { "context": 1000000, "output": 65536 },
+          "capabilities": { "toolCalling": true, "vision": true }
+        }
+      }
+    }
+  },
+  "github.copilot.llm-gateway.showProviderPrefix": false,
+  "github.copilot.llm-gateway.configMode": "config-priority"
+}
+```
+
+### 配置模式
+
+| 模式 | 说明 |
+|------|------|
+| `config-only` | 仅使用配置文件中的模型，不调用 /v1/models |
+| `config-priority` | 优先使用配置，同时合并 API 返回的模型 |
+| `api-priority` | 优先使用 API 返回的模型，配置作为补充 |
+
+### 向后兼容
+
+旧配置（单厂商）会自动迁移到新格式：
+- `serverUrl` → 映射到 default provider
+- `apiKey` → 映射到 default provider
+- 其他设置 → 作为全局默认值
 
 ---
 

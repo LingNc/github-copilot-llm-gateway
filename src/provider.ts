@@ -1339,13 +1339,15 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
   /**
    * Provide token count estimation
+   * Uses a hybrid approach for better accuracy with mixed Chinese/English content:
+   * - English: ~4 characters per token
+   * - Chinese: ~1.5 characters per token (CJK characters)
    */
   async provideTokenCount(
     model: vscode.LanguageModelChatInformation,
     text: string | vscode.LanguageModelChatMessage,
     token: vscode.CancellationToken
   ): Promise<number> {
-    // Simple approximation: ~4 characters per token
     let content: string;
 
     if (typeof text === 'string') {
@@ -1358,7 +1360,34 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         .join('');
     }
 
-    const estimatedTokens = Math.ceil(content.length / 4);
+    // Count CJK characters (Chinese, Japanese, Korean) and non-CJK characters separately
+    let cjkChars = 0;
+    let otherChars = 0;
+
+    for (const char of content) {
+      // CJK Unicode ranges
+      const code = char.codePointAt(0) || 0;
+      if (
+        (code >= 0x4E00 && code <= 0x9FFF) || // CJK Unified Ideographs
+        (code >= 0x3400 && code <= 0x4DBF) || // CJK Extension A
+        (code >= 0x3040 && code <= 0x309F) || // Hiragana
+        (code >= 0x30A0 && code <= 0x30FF) || // Katakana
+        (code >= 0xAC00 && code <= 0xD7AF)    // Korean Hangul
+      ) {
+        cjkChars++;
+      } else if (!/\s/.test(char)) {
+        // Non-whitespace, non-CJK characters
+        otherChars++;
+      }
+    }
+
+    // CJK: ~1.5 chars/token, Other: ~4 chars/token
+    const cjkTokens = Math.ceil(cjkChars / 1.5);
+    const otherTokens = Math.ceil(otherChars / 4);
+    const estimatedTokens = cjkTokens + otherTokens;
+
+    this.outputChannel.appendLine(`Token estimate: CJK=${cjkChars}(${cjkTokens}t), Other=${otherChars}(${otherTokens}t), Total=${estimatedTokens}t`);
+
     return estimatedTokens;
   }
 

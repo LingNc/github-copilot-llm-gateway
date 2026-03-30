@@ -183,7 +183,7 @@ export class ConfigManager {
 
     // Load from new format
     const providers = this.config.get<Record<string, ProviderConfig>>('providers', {});
-    const showProviderPrefix = this.config.get<boolean>('showProviderPrefix', false);
+    const showProviderPrefix = this.config.get<boolean>('showProviderPrefix', true);
     const configMode = this.config.get<ConfigMode>('configMode', 'config-priority');
 
     const multiConfig: MultiProviderConfig = {

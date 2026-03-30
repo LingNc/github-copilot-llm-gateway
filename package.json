@@ -155,7 +155,7 @@
         },
         "github.copilot.llm-gateway.showProviderPrefix": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "%config.showProviderPrefix.description%",
           "markdownDescription": "%config.showProviderPrefix.markdownDescription%",
           "order": 10

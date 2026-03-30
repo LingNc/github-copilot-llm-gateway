@@ -1243,6 +1243,12 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
             progress.report(new vscode.LanguageModelTextPart(chunk.content));
           }
 
+          // Handle reasoning_content (thinking) from OpenAI-compatible APIs (e.g., DeepSeek, Qwen)
+          if (chunk.reasoning) {
+            totalContent += chunk.reasoning;
+            progress.report(new vscode.LanguageModelTextPart(chunk.reasoning));
+          }
+
           // Capture usage data
           if (chunk.usage) {
             promptTokens = chunk.usage.prompt_tokens ?? promptTokens;

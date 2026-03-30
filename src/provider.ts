@@ -4,6 +4,7 @@
  */
 
 import * as vscode from 'vscode';
+import type { getEncoding } from 'js-tiktoken';
 import { GatewayClient } from './client';
 import { AnthropicClient } from './anthropic-client';
 import {
@@ -34,6 +35,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   private readonly currentToolSchemas: Map<string, unknown> = new Map();
   // Track if we've shown the welcome notification this session
   private hasShownWelcomeNotification = false;
+  // Cache tiktoken encoder to avoid repeated imports
+  private tiktokenEncoder: ReturnType<typeof getEncoding> | null = null;
+  private tiktokenLoadAttempted = false;
 
   constructor(
     context: vscode.ExtensionContext,
@@ -1345,7 +1349,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
   /**
    * Provide token count estimation using tiktoken
-   * Falls back to character-based estimation if tiktoken fails
+   * Falls back to character-based estimation for small content or if tiktoken fails
    */
   async provideTokenCount(
     model: vscode.LanguageModelChatInformation,
@@ -1364,20 +1368,29 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         .join('');
     }
 
-    try {
-      // Dynamically import tiktoken only when needed
-      const { getEncoding } = await import('js-tiktoken');
-      const encoder = getEncoding('cl100k_base');
-      const tokens = encoder.encode(content);
-      const estimatedTokens = tokens.length;
+    // Quick estimation for very small content (avoid tiktoken overhead)
+    if (content.length < 10) {
+      return Math.max(1, Math.ceil(content.length / 4));
+    }
 
-      this.outputChannel.appendLine(`Token estimate (tiktoken): ${estimatedTokens} tokens`);
-      return estimatedTokens;
+    try {
+      // Lazy load tiktoken encoder with caching
+      if (!this.tiktokenEncoder && !this.tiktokenLoadAttempted) {
+        this.tiktokenLoadAttempted = true;
+        const { getEncoding } = await import('js-tiktoken');
+        this.tiktokenEncoder = getEncoding('cl100k_base');
+      }
+
+      if (this.tiktokenEncoder) {
+        const tokens = this.tiktokenEncoder.encode(content);
+        return tokens.length;
+      } else {
+        // Fallback if encoder failed to load
+        return Math.ceil(content.length / 4);
+      }
     } catch (error) {
       // Fallback to character-based estimation
-      this.outputChannel.appendLine(`Token estimate (tiktoken failed, using fallback): ${error}`);
-      const estimatedTokens = Math.ceil(content.length / 4);
-      return estimatedTokens;
+      return Math.ceil(content.length / 4);
     }
   }
 

@@ -106,6 +106,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
   /**
    * Convert messages to OpenAI format
+   * Supports text, images, tools, and tool results
    */
   private convertMessages(messages: readonly vscode.LanguageModelChatMessage[]): Record<string, unknown>[] {
     const openAIMessages: Record<string, unknown>[] = [];
@@ -114,11 +115,23 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       const role = this.mapRole(msg.role);
       const toolResults: Record<string, unknown>[] = [];
       const toolCalls: Record<string, unknown>[] = [];
-      let textContent = '';
+      const contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
 
       for (const part of msg.content) {
         if (part instanceof vscode.LanguageModelTextPart) {
-          textContent += part.value;
+          contentParts.push({ type: 'text', text: part.value });
+        } else if (part instanceof vscode.LanguageModelDataPart) {
+          // Handle image data
+          if (part.mimeType.startsWith('image/')) {
+            const base64Data = Buffer.from(part.data).toString('base64');
+            const imageUrl = `data:${part.mimeType};base64,${base64Data}`;
+            contentParts.push({ type: 'image_url', image_url: { url: imageUrl } });
+            this.outputChannel.appendLine(`  Added image: ${part.mimeType}, ${part.data.length} bytes`);
+          } else {
+            // Handle other binary data as text
+            const text = Buffer.from(part.data).toString('utf-8');
+            contentParts.push({ type: 'text', text });
+          }
         } else if (part instanceof vscode.LanguageModelToolResultPart) {
           toolResults.push(this.convertToolResultPart(part));
         } else if (part instanceof vscode.LanguageModelToolCallPart) {
@@ -127,11 +140,22 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       }
 
       if (toolCalls.length > 0) {
+        // For tool calls, we need to extract text content separately
+        const textContent = contentParts
+          .filter(p => p.type === 'text')
+          .map(p => p.text)
+          .join('');
         openAIMessages.push({ role: 'assistant', content: textContent || null, tool_calls: toolCalls });
       } else if (toolResults.length > 0) {
         openAIMessages.push(...toolResults);
-      } else if (textContent) {
-        openAIMessages.push({ role, content: textContent });
+      } else if (contentParts.length > 0) {
+        // Use array format if there are images, otherwise simple string for compatibility
+        if (contentParts.some(p => p.type === 'image_url')) {
+          openAIMessages.push({ role, content: contentParts });
+        } else {
+          const textContent = contentParts.map(p => p.text).join('');
+          openAIMessages.push({ role, content: textContent });
+        }
       }
     }
 
@@ -763,11 +787,24 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     const role = this.mapRole(msg.role);
     const toolResults: Record<string, unknown>[] = [];
     const toolCalls: Record<string, unknown>[] = [];
-    let textContent = '';
+    const contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
 
     for (const part of msg.content) {
       if (part instanceof vscode.LanguageModelTextPart) {
-        textContent += part.value;
+        this.outputChannel.appendLine(`  Found text part: ${part.value.substring(0, 100)}${part.value.length > 100 ? '...' : ''}`);
+        contentParts.push({ type: 'text', text: part.value });
+      } else if (part instanceof vscode.LanguageModelDataPart) {
+        // Handle image data
+        if (part.mimeType.startsWith('image/')) {
+          const base64Data = Buffer.from(part.data).toString('base64');
+          const imageUrl = `data:${part.mimeType};base64,${base64Data}`;
+          contentParts.push({ type: 'image_url', image_url: { url: imageUrl } });
+          this.outputChannel.appendLine(`  Found image: ${part.mimeType}, ${part.data.length} bytes`);
+        } else {
+          const text = Buffer.from(part.data).toString('utf-8');
+          contentParts.push({ type: 'text', text });
+          this.outputChannel.appendLine(`  Found data part: ${part.mimeType}, ${part.data.length} bytes`);
+        }
       } else if (part instanceof vscode.LanguageModelToolResultPart) {
         this.outputChannel.appendLine(`  Found tool result: callId=${part.callId}`);
         toolResults.push(this.convertToolResultPart(part));
@@ -781,11 +818,21 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     const result: Record<string, unknown>[] = [];
     if (toolCalls.length > 0) {
+      const textContent = contentParts
+        .filter(p => p.type === 'text')
+        .map(p => p.text)
+        .join('');
       result.push({ role: 'assistant', content: textContent || null, tool_calls: toolCalls });
     } else if (toolResults.length > 0) {
       result.push(...toolResults);
-    } else if (textContent) {
-      result.push({ role, content: textContent });
+    } else if (contentParts.length > 0) {
+      // Use array format if there are images
+      if (contentParts.some(p => p.type === 'image_url')) {
+        result.push({ role, content: contentParts });
+      } else {
+        const textContent = contentParts.map(p => p.text).join('');
+        result.push({ role, content: textContent });
+      }
     }
     return result;
   }

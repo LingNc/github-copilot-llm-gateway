@@ -1268,11 +1268,48 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
       // Report token usage to VS Code for context window display
       if (promptTokens > 0 || completionTokens > 0) {
+        // Build basic prompt token details
+        // Note: This is a simplified breakdown. In a full implementation,
+        // we would categorize tokens by System, UserContext, etc.
+        const promptTokenDetails: Array<{ category: string; label: string; percentageOfPrompt: number }> = [];
+
+        // System tokens (estimated ~10% for system instructions)
+        const systemTokens = Math.floor(promptTokens * 0.1);
+        if (systemTokens > 0) {
+          promptTokenDetails.push({
+            category: 'System',
+            label: 'System Instructions',
+            percentageOfPrompt: Math.round((systemTokens / promptTokens) * 100),
+          });
+        }
+
+        // Tool definitions tokens (if tools are used)
+        if (options.tools && options.tools.length > 0) {
+          const toolTokens = Math.floor(promptTokens * 0.15);
+          promptTokenDetails.push({
+            category: 'System',
+            label: 'Tool Definitions',
+            percentageOfPrompt: Math.round((toolTokens / promptTokens) * 100),
+          });
+        }
+
+        // User context (remaining tokens)
+        const userTokens = promptTokens - systemTokens - (options.tools ? Math.floor(promptTokens * 0.15) : 0);
+        if (userTokens > 0) {
+          promptTokenDetails.push({
+            category: 'User Context',
+            label: 'Messages',
+            percentageOfPrompt: Math.round((userTokens / promptTokens) * 100),
+          });
+        }
+
         progress.usage({
           promptTokens,
           completionTokens,
+          outputBuffer: safeMaxOutputTokens,
+          promptTokenDetails,
         });
-        this.outputChannel.appendLine(`Token usage reported: prompt=${promptTokens}, completion=${completionTokens}`);
+        this.outputChannel.appendLine(`Token usage reported: prompt=${promptTokens}, completion=${completionTokens}, outputBuffer=${safeMaxOutputTokens}`);
       }
 
       if (totalContent.length === 0 && totalToolCalls === 0) {

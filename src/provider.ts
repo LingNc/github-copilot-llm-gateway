@@ -38,6 +38,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   // Cache tiktoken encoder to avoid repeated imports
   private tiktokenEncoder: ReturnType<typeof getEncoding> | null = null;
   private tiktokenLoadAttempted = false;
+  // Debug counter for token count calls
+  private tokenCountCallCount = 0;
+  private lastTokenCountLogTime = 0;
 
   constructor(
     context: vscode.ExtensionContext,
@@ -1349,13 +1352,15 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
   /**
    * Provide token count estimation using tiktoken
-   * Falls back to character-based estimation for small content or if tiktoken fails
+   * Falls back to character-based estimation if tiktoken fails
    */
   async provideTokenCount(
     model: vscode.LanguageModelChatInformation,
     text: string | vscode.LanguageModelChatMessage,
     token: vscode.CancellationToken
   ): Promise<number> {
+    this.tokenCountCallCount++;
+
     let content: string;
 
     if (typeof text === 'string') {
@@ -1368,10 +1373,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         .join('');
     }
 
-    // Quick estimation for very small content (avoid tiktoken overhead)
-    if (content.length < 10) {
-      return Math.max(1, Math.ceil(content.length / 4));
-    }
+    // Log call details with stack trace to debug frequent calls
+    const now = Date.now();
+    const stack = new Error().stack?.split('\n').slice(3, 6).join(' | ') || 'no stack';
+    this.outputChannel.appendLine(`[TokenCount #${this.tokenCountCallCount}] len=${content.length} | ${stack}`);
 
     try {
       // Lazy load tiktoken encoder with caching
@@ -1383,14 +1388,20 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
       if (this.tiktokenEncoder) {
         const tokens = this.tiktokenEncoder.encode(content);
-        return tokens.length;
+        const count = tokens.length;
+        this.outputChannel.appendLine(`  -> tiktoken: ${count} tokens`);
+        return count;
       } else {
         // Fallback if encoder failed to load
-        return Math.ceil(content.length / 4);
+        const count = Math.ceil(content.length / 4);
+        this.outputChannel.appendLine(`  -> fallback: ${count} tokens`);
+        return count;
       }
     } catch (error) {
       // Fallback to character-based estimation
-      return Math.ceil(content.length / 4);
+      const count = Math.ceil(content.length / 4);
+      this.outputChannel.appendLine(`  -> fallback(error): ${count} tokens`);
+      return count;
     }
   }
 

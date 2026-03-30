@@ -1200,7 +1200,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     try {
       let totalContent = '';
       let totalToolCalls = 0;
-      let promptTokens = 0;
+      // Initialize with estimated values as fallback
+      // Many OpenAI-compatible APIs don't return usage data in streaming mode
+      let promptTokens = estimatedInputTokens || 0;
       let completionTokens = 0;
 
       if (isAnthropic && client instanceof AnthropicClient) {
@@ -1220,7 +1222,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
             progress.report(new vscode.LanguageModelTextPart(chunk.thinking));
           }
 
-          // Capture usage data
+          // Capture usage data (Anthropic usually provides this)
           if (chunk.usage) {
             promptTokens = chunk.usage.prompt_tokens ?? promptTokens;
             completionTokens = chunk.usage.completion_tokens ?? completionTokens;
@@ -1249,7 +1251,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
             progress.report(new vscode.LanguageModelTextPart(chunk.reasoning));
           }
 
-          // Capture usage data
+          // Capture usage data if provided by API
+          // Note: Many OpenAI-compatible APIs don't include usage in streaming responses
           if (chunk.usage) {
             promptTokens = chunk.usage.prompt_tokens ?? promptTokens;
             completionTokens = chunk.usage.completion_tokens ?? completionTokens;
@@ -1262,6 +1265,13 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
             }
           }
         }
+      }
+
+      // Estimate completion tokens from generated content if not provided by API
+      // Use ~4 characters per token as a rough estimate
+      if (completionTokens === 0 && totalContent.length > 0) {
+        completionTokens = Math.ceil(totalContent.length / 4);
+        this.outputChannel.appendLine(`Estimated completion tokens from content length: ${completionTokens}`);
       }
 
       this.outputChannel.appendLine(`Completed chat request, received ${totalContent.length} characters, ${totalToolCalls} tool calls`);

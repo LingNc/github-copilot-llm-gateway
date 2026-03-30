@@ -1,0 +1,147 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "GitHub Copilot LLM Gateway Configuration",
+  "description": "Configuration schema for multi-provider LLM setup",
+  "type": "object",
+  "properties": {
+    "providers": {
+      "type": "object",
+      "description": "Provider configurations keyed by provider ID",
+      "patternProperties": {
+        "^[a-zA-Z0-9_-]+$": {
+          "$ref": "#/definitions/provider"
+        }
+      },
+      "additionalProperties": false
+    },
+    "showProviderPrefix": {
+      "type": "boolean",
+      "description": "Show provider prefix in model selector",
+      "default": false
+    },
+    "configMode": {
+      "type": "string",
+      "description": "Model information source mode",
+      "enum": ["config-only", "config-priority", "api-priority"],
+      "default": "config-priority"
+    }
+  },
+  "required": ["providers"],
+  "definitions": {
+    "provider": {
+      "type": "object",
+      "description": "A single provider configuration",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Display name for the provider (supports Chinese)"
+        },
+        "baseURL": {
+          "type": "string",
+          "description": "Base URL for the API endpoint",
+          "format": "uri"
+        },
+        "apiKey": {
+          "type": "string",
+          "description": "API key for authentication (optional)"
+        },
+        "models": {
+          "type": "object",
+          "description": "Model configurations keyed by model ID",
+          "patternProperties": {
+            "^[a-zA-Z0-9_.-]+$": {
+              "$ref": "#/definitions/model"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": ["name", "baseURL", "models"]
+    },
+    "model": {
+      "type": "object",
+      "description": "A single model configuration",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Display name for the model (supports Chinese)"
+        },
+        "modalities": {
+          "type": "object",
+          "description": "Input/output modalities supported by the model",
+          "properties": {
+            "input": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": ["text", "image", "audio"]
+              }
+            },
+            "output": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": ["text", "image", "audio"]
+              }
+            }
+          }
+        },
+        "options": {
+          "type": "object",
+          "description": "Additional model options",
+          "properties": {
+            "thinking": {
+              "type": "object",
+              "description": "Thinking/reasoning configuration",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": ["enabled", "disabled"]
+                },
+                "budgetTokens": {
+                  "type": "number",
+                  "minimum": 1
+                }
+              },
+              "required": ["type"]
+            }
+          }
+        },
+        "limit": {
+          "type": "object",
+          "description": "Token limits",
+          "properties": {
+            "context": {
+              "type": "number",
+              "description": "Maximum context tokens",
+              "minimum": 1
+            },
+            "output": {
+              "type": "number",
+              "description": "Maximum output tokens",
+              "minimum": 1
+            }
+          },
+          "required": ["context", "output"]
+        },
+        "capabilities": {
+          "type": "object",
+          "description": "Model capabilities",
+          "properties": {
+            "toolCalling": {
+              "type": "boolean",
+              "description": "Whether the model supports tool/function calling",
+              "default": true
+            },
+            "vision": {
+              "type": "boolean",
+              "description": "Whether the model supports vision/image input",
+              "default": false
+            }
+          }
+        }
+      },
+      "required": ["name", "limit"]
+    }
+  }
+}

@@ -92,3 +92,91 @@ export interface GatewayConfig {
   parallelToolCalling: boolean;
   agentTemperature: number;
 }
+
+/**
+ * Configuration mode for model information source
+ */
+export type ConfigMode = 'config-only' | 'config-priority' | 'api-priority';
+
+/**
+ * Provider name display style
+ */
+export type ProviderNameStyle = 'slash' | 'bracket';
+
+/**
+ * Model capabilities configuration
+ */
+export interface ModelCapabilities {
+  toolCalling?: boolean;
+  vision?: boolean;
+}
+
+/**
+ * Model modalities (input/output types)
+ */
+export interface ModelModalities {
+  input: ('text' | 'image' | 'audio')[];
+  output: ('text' | 'image' | 'audio')[];
+}
+
+/**
+ * Thinking/ReasOning configuration
+ */
+export interface ThinkingOptions {
+  type: 'enabled' | 'disabled';
+  budgetTokens?: number;
+}
+
+/**
+ * Model options
+ */
+export interface ModelOptions {
+  thinking?: ThinkingOptions;
+}
+
+/**
+ * Model limits (context and output)
+ */
+export interface ModelLimits {
+  context: number;
+  output: number;
+}
+
+/**
+ * Single model configuration
+ */
+export interface ModelConfig {
+  name: string;
+  modalities?: ModelModalities;
+  options?: ModelOptions;
+  limit: ModelLimits;
+  capabilities?: ModelCapabilities;
+}
+
+/**
+ * Provider configuration
+ */
+export interface ProviderConfig {
+  name: string;
+  baseURL: string;
+  apiKey?: string;
+  models: Record<string, ModelConfig>;
+}
+
+/**
+ * Complete multi-provider configuration
+ */
+export interface MultiProviderConfig {
+  providers: Record<string, ProviderConfig>;
+  showProviderPrefix: boolean;
+  providerNameStyle: ProviderNameStyle;
+  configMode: ConfigMode;
+}
+
+/**
+ * Extended gateway configuration with multi-provider support
+ * Includes backward compatible legacy fields
+ */
+export interface ExtendedGatewayConfig extends GatewayConfig, MultiProviderConfig {
+  // This combines both old and new config formats
+}

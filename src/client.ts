@@ -31,6 +31,7 @@ interface ToolCallState {
 interface ParsedChunk {
   delta?: {
     content?: string;
+    reasoning_content?: string;
     tool_calls?: Array<{
       index?: number;
       id?: string;
@@ -40,6 +41,7 @@ interface ParsedChunk {
   };
   message?: {
     content?: string;
+    reasoning_content?: string;
     text?: string;
     tool_calls?: Array<{
       index?: number;
@@ -183,7 +185,7 @@ export class GatewayClient {
   private processDeltaFormat(
     parsed: ParsedChunk,
     state: ToolCallState
-  ): { content: string; finishedToolCalls: StreamingToolCall[] } {
+  ): { content: string; reasoning?: string; finishedToolCalls: StreamingToolCall[] } {
     const delta = parsed.delta!;
     const finishedToolCalls: StreamingToolCall[] = [];
 
@@ -204,7 +206,10 @@ export class GatewayClient {
       finishedToolCalls.push(...this.finalizeToolCalls(state));
     }
 
-    return { content: delta.content || '', finishedToolCalls };
+    // Handle reasoning_content (thinking) from OpenAI-compatible APIs
+    const reasoning = delta.reasoning_content || undefined;
+
+    return { content: delta.content || '', reasoning, finishedToolCalls };
   }
 
   /**
@@ -213,7 +218,7 @@ export class GatewayClient {
   private processMessageFormat(
     parsed: ParsedChunk,
     state: ToolCallState
-  ): { content: string; finishedToolCalls: StreamingToolCall[] } {
+  ): { content: string; reasoning?: string; finishedToolCalls: StreamingToolCall[] } {
     const message = parsed.message!;
     const finishedToolCalls: StreamingToolCall[] = [];
 
@@ -243,7 +248,10 @@ export class GatewayClient {
       });
     }
 
-    return { content: message.content || message.text || '', finishedToolCalls };
+    // Handle reasoning_content (thinking) from OpenAI-compatible APIs
+    const reasoning = message.reasoning_content || undefined;
+
+    return { content: message.content || message.text || '', reasoning, finishedToolCalls };
   }
 
   /**
@@ -271,7 +279,7 @@ export class GatewayClient {
   private processSSELine(
     line: string,
     state: ToolCallState
-  ): { content: string; tool_calls: StreamingToolCall[]; finished_tool_calls: StreamingToolCall[]; usage?: { prompt_tokens?: number; completion_tokens?: number } } | null {
+  ): { content: string; reasoning?: string; tool_calls: StreamingToolCall[]; finished_tool_calls: StreamingToolCall[]; usage?: { prompt_tokens?: number; completion_tokens?: number } } | null {
     const trimmed = line.trim();
 
     if (trimmed === '' || trimmed === 'data: [DONE]') {
@@ -293,13 +301,13 @@ export class GatewayClient {
     } : undefined;
 
     if (parsed.delta) {
-      const { content, finishedToolCalls } = this.processDeltaFormat(parsed, state);
-      return { content, tool_calls: [], finished_tool_calls: finishedToolCalls, usage };
+      const { content, reasoning, finishedToolCalls } = this.processDeltaFormat(parsed, state);
+      return { content, reasoning, tool_calls: [], finished_tool_calls: finishedToolCalls, usage };
     }
 
     if (parsed.message) {
-      const { content, finishedToolCalls } = this.processMessageFormat(parsed, state);
-      return { content, tool_calls: [], finished_tool_calls: finishedToolCalls, usage };
+      const { content, reasoning, finishedToolCalls } = this.processMessageFormat(parsed, state);
+      return { content, reasoning, tool_calls: [], finished_tool_calls: finishedToolCalls, usage };
     }
 
     return null;
@@ -334,7 +342,7 @@ export class GatewayClient {
   public async *streamChatCompletion(
     request: OpenAIChatCompletionRequest,
     cancellationToken: vscode.CancellationToken
-  ): AsyncGenerator<{ content: string; tool_calls: StreamingToolCall[]; finished_tool_calls: StreamingToolCall[]; usage?: { prompt_tokens?: number; completion_tokens?: number } }, void, unknown> {
+  ): AsyncGenerator<{ content: string; reasoning?: string; tool_calls: StreamingToolCall[]; finished_tool_calls: StreamingToolCall[]; usage?: { prompt_tokens?: number; completion_tokens?: number } }, void, unknown> {
     // User's baseURL should already include the correct API path prefix
     const baseUrl = this.config.serverUrl.replace(/\/$/, '');
     const url = `${baseUrl}/chat/completions`;

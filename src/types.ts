@@ -198,7 +198,8 @@ export type AnthropicContentBlock =
   | { type: 'text'; text: string }
   | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
-  | { type: 'tool_result'; tool_use_id: string; content: string };
+  | { type: 'tool_result'; tool_use_id: string; content: string }
+  | { type: 'thinking'; thinking: string; signature?: string };
 
 /**
  * Anthropic message
@@ -255,7 +256,7 @@ export interface AnthropicMessageResponse {
 export type AnthropicStreamEvent =
   | { type: 'message_start'; message: { id: string; type: 'message'; role: 'assistant'; content: []; model: string; stop_reason: null; stop_sequence: null; usage: { input_tokens: number; output_tokens: number } } }
   | { type: 'content_block_start'; index: number; content_block: AnthropicContentBlock }
-  | { type: 'content_block_delta'; index: number; delta: { type: 'text_delta'; text: string } | { type: 'input_json_delta'; partial_json: string } }
+  | { type: 'content_block_delta'; index: number; delta: { type: 'text_delta'; text: string } | { type: 'input_json_delta'; partial_json: string } | { type: 'thinking_delta'; thinking: string } }
   | { type: 'content_block_stop'; index: number }
   | { type: 'message_delta'; usage?: { output_tokens: number }; stop_reason?: AnthropicMessageResponse['stop_reason']; stop_sequence?: string | null }
   | { type: 'message_stop' };

@@ -136,9 +136,9 @@
         },
         "github.copilot.llm-gateway.agentTemperature": {
           "type": "number",
-          "default": 0.0,
-          "minimum": 0.0,
-          "maximum": 2.0,
+          "default": 0,
+          "minimum": 0,
+          "maximum": 2,
           "description": "%config.agentTemperature.description%",
           "markdownDescription": "%config.agentTemperature.markdownDescription%",
           "order": 8
@@ -195,5 +195,8 @@
     "esbuild": "^0.27.0",
     "eslint": "^9.39.1",
     "typescript": "^5.7.2"
+  },
+  "dependencies": {
+    "js-tiktoken": "^1.0.21"
   }
 }

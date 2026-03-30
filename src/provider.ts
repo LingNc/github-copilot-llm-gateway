@@ -4,6 +4,7 @@
  */
 
 import * as vscode from 'vscode';
+import { encodingForModel, getEncoding } from 'js-tiktoken';
 import { GatewayClient } from './client';
 import { AnthropicClient } from './anthropic-client';
 import {
@@ -1338,10 +1339,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   }
 
   /**
-   * Provide token count estimation
-   * Uses a hybrid approach for better accuracy with mixed Chinese/English content:
-   * - English: ~4 characters per token
-   * - Chinese: ~1.5 characters per token (CJK characters)
+   * Provide token count estimation using tiktoken
+   * Falls back to character-based estimation if tiktoken fails
    */
   async provideTokenCount(
     model: vscode.LanguageModelChatInformation,
@@ -1360,35 +1359,21 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         .join('');
     }
 
-    // Count CJK characters (Chinese, Japanese, Korean) and non-CJK characters separately
-    let cjkChars = 0;
-    let otherChars = 0;
+    try {
+      // Try to use tiktoken for accurate token counting
+      // Use cl100k_base encoding which is used by GPT-4, GPT-3.5, and many other models
+      const encoder = getEncoding('cl100k_base');
+      const tokens = encoder.encode(content);
+      const estimatedTokens = tokens.length;
 
-    for (const char of content) {
-      // CJK Unicode ranges
-      const code = char.codePointAt(0) || 0;
-      if (
-        (code >= 0x4E00 && code <= 0x9FFF) || // CJK Unified Ideographs
-        (code >= 0x3400 && code <= 0x4DBF) || // CJK Extension A
-        (code >= 0x3040 && code <= 0x309F) || // Hiragana
-        (code >= 0x30A0 && code <= 0x30FF) || // Katakana
-        (code >= 0xAC00 && code <= 0xD7AF)    // Korean Hangul
-      ) {
-        cjkChars++;
-      } else if (!/\s/.test(char)) {
-        // Non-whitespace, non-CJK characters
-        otherChars++;
-      }
+      this.outputChannel.appendLine(`Token estimate (tiktoken): ${estimatedTokens} tokens`);
+      return estimatedTokens;
+    } catch (error) {
+      // Fallback to character-based estimation
+      this.outputChannel.appendLine(`Token estimate (tiktoken failed, using fallback): ${error}`);
+      const estimatedTokens = Math.ceil(content.length / 4);
+      return estimatedTokens;
     }
-
-    // CJK: ~1.5 chars/token, Other: ~4 chars/token
-    const cjkTokens = Math.ceil(cjkChars / 1.5);
-    const otherTokens = Math.ceil(otherChars / 4);
-    const estimatedTokens = cjkTokens + otherTokens;
-
-    this.outputChannel.appendLine(`Token estimate: CJK=${cjkChars}(${cjkTokens}t), Other=${otherChars}(${otherTokens}t), Total=${estimatedTokens}t`);
-
-    return estimatedTokens;
   }
 
   /**

@@ -50,6 +50,11 @@ interface ParsedChunk {
   };
   finishReason?: string;
   id?: string;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
 }
 
 /**
@@ -252,6 +257,7 @@ export class GatewayClient {
         message: parsed.choices?.[0]?.message,
         finishReason: parsed.choices?.[0]?.finish_reason,
         id: parsed.id,
+        usage: parsed.usage,
       };
     } catch {
       console.error('Failed to parse SSE chunk:', data);
@@ -265,7 +271,7 @@ export class GatewayClient {
   private processSSELine(
     line: string,
     state: ToolCallState
-  ): { content: string; tool_calls: StreamingToolCall[]; finished_tool_calls: StreamingToolCall[] } | null {
+  ): { content: string; tool_calls: StreamingToolCall[]; finished_tool_calls: StreamingToolCall[]; usage?: { prompt_tokens?: number; completion_tokens?: number } } | null {
     const trimmed = line.trim();
 
     if (trimmed === '' || trimmed === 'data: [DONE]') {
@@ -280,14 +286,20 @@ export class GatewayClient {
     const parsed = this.parseSSEData(data);
     if (!parsed) { return null; }
 
+    // Extract usage if present
+    const usage = parsed.usage ? {
+      prompt_tokens: parsed.usage.prompt_tokens,
+      completion_tokens: parsed.usage.completion_tokens,
+    } : undefined;
+
     if (parsed.delta) {
       const { content, finishedToolCalls } = this.processDeltaFormat(parsed, state);
-      return { content, tool_calls: [], finished_tool_calls: finishedToolCalls };
+      return { content, tool_calls: [], finished_tool_calls: finishedToolCalls, usage };
     }
 
     if (parsed.message) {
       const { content, finishedToolCalls } = this.processMessageFormat(parsed, state);
-      return { content, tool_calls: [], finished_tool_calls: finishedToolCalls };
+      return { content, tool_calls: [], finished_tool_calls: finishedToolCalls, usage };
     }
 
     return null;
@@ -296,7 +308,7 @@ export class GatewayClient {
   /**
    * Get remaining unfinalised tool calls
    */
-  private getRemainingToolCalls(state: ToolCallState): StreamingToolCall[] {
+  private getRemainingToolCalls(state: ToolCallState): { toolCalls: StreamingToolCall[]; usage?: { prompt_tokens?: number; completion_tokens?: number } } {
     const remaining: StreamingToolCall[] = [];
 
     for (const [index, tc] of state.toolCallsByIndex.entries()) {
@@ -309,7 +321,7 @@ export class GatewayClient {
       }
     }
 
-    return remaining;
+    return { toolCalls: remaining };
   }
 
   /**
@@ -322,7 +334,7 @@ export class GatewayClient {
   public async *streamChatCompletion(
     request: OpenAIChatCompletionRequest,
     cancellationToken: vscode.CancellationToken
-  ): AsyncGenerator<{ content: string; tool_calls: StreamingToolCall[]; finished_tool_calls: StreamingToolCall[] }, void, unknown> {
+  ): AsyncGenerator<{ content: string; tool_calls: StreamingToolCall[]; finished_tool_calls: StreamingToolCall[]; usage?: { prompt_tokens?: number; completion_tokens?: number } }, void, unknown> {
     // User's baseURL should already include the correct API path prefix
     const baseUrl = this.config.serverUrl.replace(/\/$/, '');
     const url = `${baseUrl}/chat/completions`;
@@ -369,8 +381,8 @@ export class GatewayClient {
 
       // Finalize any remaining tool calls
       const remaining = this.getRemainingToolCalls(state);
-      if (remaining.length > 0) {
-        yield { content: '', tool_calls: [], finished_tool_calls: remaining };
+      if (remaining.toolCalls.length > 0) {
+        yield { content: '', tool_calls: [], finished_tool_calls: remaining.toolCalls };
       }
     } catch (error) {
       if (error instanceof Error) {

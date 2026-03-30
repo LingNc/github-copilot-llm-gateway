@@ -247,7 +247,7 @@ export class AnthropicClient {
       tool_choice?: { type: 'auto' | 'any' | 'tool'; name?: string };
     },
     cancellationToken: { isCancellationRequested: boolean }
-  ): AsyncGenerator<{ content: string; tool_calls: StreamingToolCall[]; finished_tool_calls: StreamingToolCall[] }, void, unknown> {
+  ): AsyncGenerator<{ content: string; tool_calls: StreamingToolCall[]; finished_tool_calls: StreamingToolCall[]; usage?: { prompt_tokens: number; completion_tokens: number } }, void, unknown> {
     const baseUrl = this.config.baseURL.replace(/\/$/, '');
     const url = `${baseUrl}/messages`;
 
@@ -317,10 +317,18 @@ export class AnthropicClient {
         }
       }
 
-      // Finalize any remaining tool calls
+      // Finalize any remaining tool calls and return usage
       const finalized = this.getFinalizedToolCalls(state);
-      if (finalized.length > 0) {
-        yield { content: '', tool_calls: [], finished_tool_calls: finalized };
+      if (finalized.length > 0 || state.inputTokens > 0 || state.outputTokens > 0) {
+        yield {
+          content: '',
+          tool_calls: [],
+          finished_tool_calls: finalized,
+          usage: state.inputTokens > 0 || state.outputTokens > 0 ? {
+            prompt_tokens: state.inputTokens,
+            completion_tokens: state.outputTokens,
+          } : undefined,
+        };
       }
     } catch (error) {
       if (error instanceof Error) {
@@ -336,7 +344,7 @@ export class AnthropicClient {
   private processSSELine(
     line: string,
     state: StreamState
-  ): { content: string; tool_calls: StreamingToolCall[]; finished_tool_calls: StreamingToolCall[] } | null {
+  ): { content: string; tool_calls: StreamingToolCall[]; finished_tool_calls: StreamingToolCall[]; usage?: { prompt_tokens: number; completion_tokens: number } } | null {
     const trimmed = line.trim();
 
     if (trimmed === '' || trimmed === 'data: [DONE]') {
@@ -369,6 +377,19 @@ export class AnthropicClient {
           content: result.content,
           tool_calls: result.tool_calls,
           finished_tool_calls: [],
+        };
+      }
+
+      // Return usage on message_stop if we have token counts
+      if (event.type === 'message_stop' && (state.inputTokens > 0 || state.outputTokens > 0)) {
+        return {
+          content: '',
+          tool_calls: [],
+          finished_tool_calls: [],
+          usage: {
+            prompt_tokens: state.inputTokens,
+            completion_tokens: state.outputTokens,
+          },
         };
       }
 

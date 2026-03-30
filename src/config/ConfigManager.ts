@@ -11,6 +11,7 @@ import {
   ConfigLoadResult,
   ResolvedProvider,
   ResolvedModel,
+  ProviderNameStyle,
 } from './types';
 import { validateMultiProviderConfig, formatValidationErrors } from './validator';
 import { checkAndPerformMigration } from './migration';
@@ -58,6 +59,13 @@ export class ConfigManager {
    */
   public shouldShowProviderPrefix(): boolean {
     return this.currentConfig.showProviderPrefix;
+  }
+
+  /**
+   * Get provider name display style
+   */
+  public getProviderNameStyle(): ProviderNameStyle {
+    return this.currentConfig.providerNameStyle;
   }
 
   /**
@@ -184,11 +192,13 @@ export class ConfigManager {
     // Load from new format
     const providers = this.config.get<Record<string, ProviderConfig>>('providers', {});
     const showProviderPrefix = this.config.get<boolean>('showProviderPrefix', true);
+    const providerNameStyle = this.config.get<ProviderNameStyle>('providerNameStyle', 'bracket');
     const configMode = this.config.get<ConfigMode>('configMode', 'config-priority');
 
     const multiConfig: MultiProviderConfig = {
       providers,
       showProviderPrefix,
+      providerNameStyle,
       configMode,
     };
 

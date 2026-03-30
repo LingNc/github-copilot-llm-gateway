@@ -160,6 +160,17 @@
           "markdownDescription": "%config.showProviderPrefix.markdownDescription%",
           "order": 10
         },
+        "github.copilot.llm-gateway.providerNameStyle": {
+          "type": "string",
+          "enum": [
+            "slash",
+            "bracket"
+          ],
+          "default": "bracket",
+          "description": "%config.providerNameStyle.description%",
+          "markdownDescription": "%config.providerNameStyle.markdownDescription%",
+          "order": 11
+        },
         "github.copilot.llm-gateway.configMode": {
           "type": "string",
           "enum": [
@@ -170,7 +181,7 @@
           "default": "config-priority",
           "description": "%config.configMode.description%",
           "markdownDescription": "%config.configMode.markdownDescription%",
-          "order": 11
+          "order": 12
         }
       }
     }

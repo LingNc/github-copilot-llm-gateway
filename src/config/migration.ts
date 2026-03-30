@@ -9,6 +9,7 @@ import {
   MultiProviderConfig,
   ProviderConfig,
   ModelConfig,
+  ProviderNameStyle,
 } from './types';
 
 /**
@@ -84,6 +85,7 @@ export function migrateToMultiProvider(legacy: LegacyConfig): MultiProviderConfi
       'default': defaultProvider,
     },
     showProviderPrefix: false,
+    providerNameStyle: 'bracket',
     configMode: 'api-priority', // Use API-priority for legacy to maintain behavior
   };
 }
@@ -96,6 +98,7 @@ export function createEmptyMultiProviderConfig(): MultiProviderConfig {
   return {
     providers: {},
     showProviderPrefix: false,
+    providerNameStyle: 'bracket',
     configMode: 'config-only',
   };
 }
@@ -130,6 +133,7 @@ export function createExampleMultiProviderConfig(): MultiProviderConfig {
       },
     },
     showProviderPrefix: false,
+    providerNameStyle: 'bracket',
     configMode: 'config-only',
   };
 }
@@ -200,6 +204,7 @@ export function checkAndPerformMigration(
     config: {
       providers: providers || {},
       showProviderPrefix: config.get<boolean>('showProviderPrefix', false),
+      providerNameStyle: config.get<ProviderNameStyle>('providerNameStyle', 'bracket'),
       configMode: config.get<('config-only' | 'config-priority' | 'api-priority')>('configMode', 'config-priority'),
     },
     warnings,

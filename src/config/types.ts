@@ -11,6 +11,7 @@ import {
   ModelConfig,
   ProviderConfig,
   MultiProviderConfig,
+  ProviderNameStyle,
 } from '../types';
 
 export {
@@ -22,6 +23,7 @@ export {
   ModelConfig,
   ProviderConfig,
   MultiProviderConfig,
+  ProviderNameStyle,
 };
 
 /**

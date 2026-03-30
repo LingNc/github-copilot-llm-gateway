@@ -1,4 +1,6 @@
-# Extension specific files
+# Project specific
+temp/
+docs/
 *.vsix
 .DS_Store
 

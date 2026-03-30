@@ -86,7 +86,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     return {
       tool_call_id: part.callId,
       role: 'tool',
-      content: typeof part.content === 'string' ? part.content : JSON.stringify(part.content),
+      content: typeof part.content === 'string' ? part.content : this.safeStringify(part.content),
     };
   }
 
@@ -99,7 +99,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       type: 'function',
       function: {
         name: part.name,
-        arguments: JSON.stringify(part.input),
+        arguments: this.safeStringify(part.input),
       },
     };
   }
@@ -287,7 +287,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         const propSchema = properties[requiredProp];
         const defaultValue = this.getDefaultForType(propSchema);
         filledArgs[requiredProp] = defaultValue;
-        filledProperties.push(`${requiredProp}=${JSON.stringify(defaultValue)}`);
+        filledProperties.push(`${requiredProp}=${this.safeStringify(defaultValue)}`);
       }
     }
 
@@ -299,6 +299,30 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   }
 
   /**
+   * Safely stringify an object, handling circular references
+   */
+  private safeStringify(obj: unknown): string {
+    try {
+      return JSON.stringify(obj);
+    } catch (error) {
+      if (error instanceof TypeError && error.message.includes('circular')) {
+        // Handle circular references by using a replacer
+        const seen = new WeakSet();
+        return JSON.stringify(obj, (key, value) => {
+          if (typeof value === 'object' && value !== null) {
+            if (seen.has(value)) {
+              return '[Circular Reference]';
+            }
+            seen.add(value);
+          }
+          return value;
+        });
+      }
+      return String(obj);
+    }
+  }
+
+  /**
    * Estimate token count for a message
    */
   private estimateMessageTokens(message: any): number {
@@ -306,10 +330,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     if (typeof message.content === 'string') {
       text = message.content;
     } else if (message.content) {
-      text = JSON.stringify(message.content);
+      text = this.safeStringify(message.content);
     }
     if (message.tool_calls) {
-      text += JSON.stringify(message.tool_calls);
+      text += this.safeStringify(message.tool_calls);
     }
     // Rough estimate: ~4 characters per token
     return Math.ceil(text.length / 4);
@@ -768,14 +792,14 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       toolResults.push({
         tool_call_id: anyPart.callId,
         role: 'tool',
-        content: typeof anyPart.content === 'string' ? anyPart.content : JSON.stringify(anyPart.content),
+        content: typeof anyPart.content === 'string' ? anyPart.content : this.safeStringify(anyPart.content),
       });
     } else if ('callId' in anyPart && 'name' in anyPart && 'input' in anyPart) {
       this.outputChannel.appendLine(`  Found tool call (duck-typed): callId=${anyPart.callId}, name=${anyPart.name}`);
       toolCalls.push({
         id: anyPart.callId,
         type: 'function',
-        function: { name: anyPart.name, arguments: JSON.stringify(anyPart.input) },
+        function: { name: anyPart.name, arguments: this.safeStringify(anyPart.input) },
       });
     }
   }
@@ -1040,7 +1064,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       resolvedModel?.limit.output ?? this.gatewayConfig.defaultMaxOutputTokens,
       Math.floor(modelMaxContext / 2)
     );
-    const toolsTokenEstimate = options.tools ? Math.ceil(JSON.stringify(options.tools).length / 4 * 1.2) : 0;
+    const toolsTokenEstimate = options.tools ? Math.ceil(this.safeStringify(options.tools).length / 4 * 1.2) : 0;
     const maxInputTokens = modelMaxContext - desiredOutputTokens - toolsTokenEstimate - 256;
 
     const truncatedMessages = this.truncateMessagesToFit(openAIMessages, maxInputTokens);
@@ -1051,13 +1075,13 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     // Build input text for token estimation
     const inputText = truncatedMessages
       .map((m) => {
-        let text = typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '');
-        if (m.tool_calls) { text += JSON.stringify(m.tool_calls); }
+        let text = typeof m.content === 'string' ? m.content : this.safeStringify(m.content || '');
+        if (m.tool_calls) { text += this.safeStringify(m.tool_calls); }
         return text;
       })
       .join('\n');
 
-    const toolsOverhead = options.tools ? Math.ceil(JSON.stringify(options.tools).length / 4) : 0;
+    const toolsOverhead = options.tools ? Math.ceil(this.safeStringify(options.tools).length / 4) : 0;
     const estimatedInputTokens = await this.provideTokenCount(model, inputText, token);
     const safeMaxOutputTokens = this.calculateSafeMaxOutputTokens(estimatedInputTokens, toolsOverhead, model.id);
 
@@ -1092,7 +1116,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     }
 
     // Log request
-    const debugRequest = JSON.stringify(requestOptions, null, 2);
+    const debugRequest = this.safeStringify(requestOptions);
     this.outputChannel.appendLine(debugRequest.length > 2000 ? `Request (truncated): ${debugRequest.substring(0, 2000)}...` : `Request: ${debugRequest}`);
 
     try {

@@ -73,7 +73,8 @@ export class GatewayClient {
    * Fetch available models from /v1/models endpoint
    */
   public async fetchModels(): Promise<OpenAIModelsResponse> {
-    const url = `${this.config.serverUrl}/v1/models`;
+    const baseUrl = this.config.serverUrl.replace(/\/$/, '');
+    const url = `${baseUrl}/models`;
 
     try {
       const response = await this.fetch(url, {
@@ -322,7 +323,9 @@ export class GatewayClient {
     request: OpenAIChatCompletionRequest,
     cancellationToken: vscode.CancellationToken
   ): AsyncGenerator<{ content: string; tool_calls: StreamingToolCall[]; finished_tool_calls: StreamingToolCall[] }, void, unknown> {
-    const url = `${this.config.serverUrl}/v1/chat/completions`;
+    // User's baseURL should already include the correct API path prefix
+    const baseUrl = this.config.serverUrl.replace(/\/$/, '');
+    const url = `${baseUrl}/chat/completions`;
     const state = this.createToolCallState();
 
     try {

@@ -206,6 +206,21 @@ OpenAI/Anthropic Compatible Server (vLLM/Ollama/Anthropic/etc)
 4. 当功能有较大变更时，必须同步更新 README.md。
 5. 每次完成一项功能需要提交git，风格仿照曾经的提交记录的模式。
 
+### Git 提交规范
+- **格式**: `🛠️ 文件路径 -> 简短描述`
+- **前缀**: 使用锤子表情符号 `🛠️` 开头
+- **文件路径**: 列出主要修改的文件（用逗号分隔），放在 `->` 前面
+- **描述**: 简短描述修改内容，放在 `->` 后面
+- **语言**: 中文或英文均可，保持简洁
+- **不要包含**: Co-Authored-By、Signed-off-by 等信息
+
+**示例**:
+```
+🛠️ src/client.ts,src/provider.ts -> 实现 Token 使用量显示功能
+🛠️ AGENTS.md -> 添加 Git 提交规范
+🛠️ src/provider.ts -> 修复栈溢出问题
+```
+
 ### 维护责任
 - 每次会话开始前，AI 工具应优先读取 AGENTS.md 了解项目状态。
 - 每次重要变更后，AI 应及时更新此文档。

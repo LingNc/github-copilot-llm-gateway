@@ -60,7 +60,7 @@ npm run package
 - [x] 中英双语支持
 - [x] Anthropic API 支持
 - [x] 模型 thinking 配置支持
-- [ ] Copilot 上下文 token 显示修复（需进一步研究）
+- [x] Copilot 上下文 token 显示修复（通过 progress.usage() 报告）
 - [ ] 完整测试和 bug 修复
 
 ### 最新进度
@@ -72,6 +72,7 @@ npm run package
 - 中英双语界面支持
 - 向后兼容旧配置
 - **新增**: Anthropic API 格式支持（apiFormat: 'anthropic'）
+- **新增**: Token 使用量显示修复（通过 progress.usage() 报告给 VS Code）
 
 ### 文件清单
 | 文件 | 说明 |

@@ -1200,6 +1200,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     try {
       let totalContent = '';
       let totalToolCalls = 0;
+      let promptTokens = 0;
+      let completionTokens = 0;
 
       if (isAnthropic && client instanceof AnthropicClient) {
         // Use Anthropic streaming format
@@ -1209,6 +1211,12 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           if (chunk.content) {
             totalContent += chunk.content;
             progress.report(new vscode.LanguageModelTextPart(chunk.content));
+          }
+
+          // Capture usage data
+          if (chunk.usage) {
+            promptTokens = chunk.usage.prompt_tokens ?? promptTokens;
+            completionTokens = chunk.usage.completion_tokens ?? completionTokens;
           }
 
           if (chunk.finished_tool_calls?.length) {
@@ -1228,6 +1236,12 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
             progress.report(new vscode.LanguageModelTextPart(chunk.content));
           }
 
+          // Capture usage data
+          if (chunk.usage) {
+            promptTokens = chunk.usage.prompt_tokens ?? promptTokens;
+            completionTokens = chunk.usage.completion_tokens ?? completionTokens;
+          }
+
           if (chunk.finished_tool_calls?.length) {
             for (const toolCall of chunk.finished_tool_calls) {
               totalToolCalls++;
@@ -1238,6 +1252,15 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       }
 
       this.outputChannel.appendLine(`Completed chat request, received ${totalContent.length} characters, ${totalToolCalls} tool calls`);
+
+      // Report token usage to VS Code for context window display
+      if (promptTokens > 0 || completionTokens > 0) {
+        progress.usage({
+          promptTokens,
+          completionTokens,
+        });
+        this.outputChannel.appendLine(`Token usage reported: prompt=${promptTokens}, completion=${completionTokens}`);
+      }
 
       if (totalContent.length === 0 && totalToolCalls === 0) {
         await this.handleEmptyResponse(

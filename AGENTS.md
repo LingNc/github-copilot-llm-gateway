@@ -62,6 +62,7 @@ npm run package
 - [x] 模型 thinking 配置支持
 - [x] Copilot 上下文 token 显示修复（通过 progress.usage() 报告）
 - [x] Claude 3.7 Thinking 内容支持
+- [ ] 模型思考等级配置支持（Kimi/Qwen）
 - [ ] 完整测试和 bug 修复
 
 ### 最新进度

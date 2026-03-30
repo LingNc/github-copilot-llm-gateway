@@ -58,7 +58,9 @@ npm run package
 - [x] 多厂商配置系统
 - [x] 配置文件支持和热重载
 - [x] 中英双语支持
-- [ ] Anthropic API 支持（进行中）
+- [x] Anthropic API 支持
+- [x] 模型 thinking 配置支持
+- [ ] Copilot 上下文 token 显示修复（需进一步研究）
 - [ ] 完整测试和 bug 修复
 
 ### 最新进度

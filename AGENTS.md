@@ -142,7 +142,7 @@ OpenAI Compatible Server (vLLM/Ollama/etc)
     }
   },
   "github.copilot.llm-gateway.showProviderPrefix": true,
-  "github.copilot.llm-gateway.providerNameStyle": "bracket",
+  "github.copilot.llm-gateway.providerNameStyle": "slash",
   "github.copilot.llm-gateway.configMode": "config-priority"
 }
 ```

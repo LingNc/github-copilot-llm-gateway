@@ -5,20 +5,28 @@
 
 import * as vscode from 'vscode';
 import { GatewayClient } from './client';
+import { AnthropicClient } from './anthropic-client';
 import {
   GatewayConfig,
   OpenAIChatCompletionRequest,
   ModelConfig,
+  ProviderConfig,
 } from './types';
 import { ConfigManager } from './config/ConfigManager';
 import { ResolvedModel, ConfigMode, ProviderNameStyle } from './config/types';
+
+/**
+ * Union type for either client type
+ */
+type ApiClient = GatewayClient | AnthropicClient;
 
 /**
  * Language model provider for OpenAI-compatible inference servers
  * Supports multi-provider configuration
  */
 export class GatewayProvider implements vscode.LanguageModelChatProvider {
-  private readonly client: GatewayClient;
+  private readonly defaultClient: GatewayClient;
+  private readonly clients: Map<string, ApiClient> = new Map();
   private gatewayConfig: GatewayConfig;
   private outputChannel: vscode.OutputChannel;
   private configManager: ConfigManager;
@@ -37,7 +45,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     // Load default config from first provider or global settings
     this.gatewayConfig = this.loadDefaultConfig();
-    this.client = new GatewayClient(this.gatewayConfig);
+    this.defaultClient = new GatewayClient(this.gatewayConfig);
 
     // Watch for configuration changes
     context.subscriptions.push(
@@ -463,49 +471,89 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   }
 
   /**
-   * Stream chat completion
+   * Stream chat completion - delegates to appropriate client
    */
   private async streamChatCompletion(
     requestOptions: any,
     progress: vscode.Progress<vscode.LanguageModelResponsePart>,
-    token: vscode.CancellationToken
+    token: vscode.CancellationToken,
+    client: ApiClient,
+    isAnthropic: boolean
   ): Promise<void> {
     this.outputChannel.appendLine(`Streaming chat completion...`);
     let totalContent = '';
     let totalToolCalls = 0;
 
-    for await (const chunk of this.client.streamChatCompletion(requestOptions as OpenAIChatCompletionRequest, token)) {
-      if (token.isCancellationRequested) {
-        break;
-      }
+    if (isAnthropic && client instanceof AnthropicClient) {
+      for await (const chunk of client.streamMessages(requestOptions, token)) {
+        if (token.isCancellationRequested) {
+          break;
+        }
 
-      // Report text content immediately
-      if (chunk.content) {
-        totalContent += chunk.content;
-        progress.report(new vscode.LanguageModelTextPart(chunk.content));
-      }
+        // Report text content immediately
+        if (chunk.content) {
+          totalContent += chunk.content;
+          progress.report(new vscode.LanguageModelTextPart(chunk.content));
+        }
 
-      // Process finished tool calls
-      if (chunk.finished_tool_calls && chunk.finished_tool_calls.length > 0) {
-        for (const toolCall of chunk.finished_tool_calls) {
-          totalToolCalls++;
-          this.outputChannel.appendLine(`Tool call received: id=${toolCall.id}, name=${toolCall.name}`);
-          this.outputChannel.appendLine(`  Raw arguments: ${toolCall.arguments.substring(0, 500)}${toolCall.arguments.length > 500 ? '...' : ''}`);
+        // Process finished tool calls
+        if (chunk.finished_tool_calls && chunk.finished_tool_calls.length > 0) {
+          for (const toolCall of chunk.finished_tool_calls) {
+            totalToolCalls++;
+            this.outputChannel.appendLine(`Tool call received: id=${toolCall.id}, name=${toolCall.name}`);
+            this.outputChannel.appendLine(`  Raw arguments: ${toolCall.arguments.substring(0, 500)}${toolCall.arguments.length > 500 ? '...' : ''}`);
 
-          // Parse arguments with repair capability
-          let args = this.tryRepairJson(toolCall.arguments) as Record<string, unknown> | null;
+            // Parse arguments with repair capability
+            let args = this.tryRepairJson(toolCall.arguments) as Record<string, unknown> | null;
 
-          if (args === null) {
-            this.outputChannel.appendLine(`ERROR: Failed to parse tool call arguments for ${toolCall.name}`);
-            this.outputChannel.appendLine(`  Full arguments: ${toolCall.arguments}`);
-            args = {}; // Fallback to empty args
+            if (args === null) {
+              this.outputChannel.appendLine(`ERROR: Failed to parse tool call arguments for ${toolCall.name}`);
+              this.outputChannel.appendLine(`  Full arguments: ${toolCall.arguments}`);
+              args = {}; // Fallback to empty args
+            }
+
+            progress.report(new vscode.LanguageModelToolCallPart(
+              toolCall.id,
+              toolCall.name,
+              args as object
+            ));
           }
+        }
+      }
+    } else if (client instanceof GatewayClient) {
+      for await (const chunk of client.streamChatCompletion(requestOptions as OpenAIChatCompletionRequest, token)) {
+        if (token.isCancellationRequested) {
+          break;
+        }
 
-          progress.report(new vscode.LanguageModelToolCallPart(
-            toolCall.id,
-            toolCall.name,
-            args as object
-          ));
+        // Report text content immediately
+        if (chunk.content) {
+          totalContent += chunk.content;
+          progress.report(new vscode.LanguageModelTextPart(chunk.content));
+        }
+
+        // Process finished tool calls
+        if (chunk.finished_tool_calls && chunk.finished_tool_calls.length > 0) {
+          for (const toolCall of chunk.finished_tool_calls) {
+            totalToolCalls++;
+            this.outputChannel.appendLine(`Tool call received: id=${toolCall.id}, name=${toolCall.name}`);
+            this.outputChannel.appendLine(`  Raw arguments: ${toolCall.arguments.substring(0, 500)}${toolCall.arguments.length > 500 ? '...' : ''}`);
+
+            // Parse arguments with repair capability
+            let args = this.tryRepairJson(toolCall.arguments) as Record<string, unknown> | null;
+
+            if (args === null) {
+              this.outputChannel.appendLine(`ERROR: Failed to parse tool call arguments for ${toolCall.name}`);
+              this.outputChannel.appendLine(`  Full arguments: ${toolCall.arguments}`);
+              args = {}; // Fallback to empty args
+            }
+
+            progress.report(new vscode.LanguageModelToolCallPart(
+              toolCall.id,
+              toolCall.name,
+              args as object
+            ));
+          }
         }
       }
     }
@@ -693,25 +741,45 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   /**
    * Get or create client for a provider
    */
-  private getClient(providerId: string): GatewayClient {
+  private getClient(providerId: string): ApiClient {
+    // Check if we already have a client for this provider
+    const existingClient = this.clients.get(providerId);
+    if (existingClient) {
+      return existingClient;
+    }
+
     // Create new client for this provider
     const provider = this.configManager.getProvider(providerId);
     if (!provider) {
       throw new Error(`Provider "${providerId}" not found`);
     }
 
-    const gatewayConfig: GatewayConfig = {
-      serverUrl: provider.baseURL,
-      apiKey: provider.apiKey ?? '',
-      requestTimeout: this.gatewayConfig.requestTimeout,
-      defaultMaxTokens: this.gatewayConfig.defaultMaxTokens,
-      defaultMaxOutputTokens: this.gatewayConfig.defaultMaxOutputTokens,
-      enableToolCalling: this.gatewayConfig.enableToolCalling,
-      parallelToolCalling: this.gatewayConfig.parallelToolCalling,
-      agentTemperature: this.gatewayConfig.agentTemperature,
-    };
+    // Determine API format
+    const apiFormat = provider.apiFormat ?? 'openai';
 
-    return new GatewayClient(gatewayConfig);
+    if (apiFormat === 'anthropic') {
+      // Create Anthropic client
+      const anthropicClient = new AnthropicClient(provider);
+      this.clients.set(providerId, anthropicClient);
+      this.outputChannel.appendLine(`Created Anthropic client for provider "${providerId}"`);
+      return anthropicClient;
+    } else {
+      // Create OpenAI-compatible client
+      const gatewayConfig: GatewayConfig = {
+        serverUrl: provider.baseURL,
+        apiKey: provider.apiKey ?? '',
+        requestTimeout: this.gatewayConfig.requestTimeout,
+        defaultMaxTokens: this.gatewayConfig.defaultMaxTokens,
+        defaultMaxOutputTokens: this.gatewayConfig.defaultMaxOutputTokens,
+        enableToolCalling: this.gatewayConfig.enableToolCalling,
+        parallelToolCalling: this.gatewayConfig.parallelToolCalling,
+        agentTemperature: this.gatewayConfig.agentTemperature,
+      };
+
+      const client = new GatewayClient(gatewayConfig);
+      this.clients.set(providerId, client);
+      return client;
+    }
   }
 
   /**
@@ -1111,6 +1179,12 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       this.outputChannel.appendLine(`Sending ${toolsConfig.length} tools to model (parallel: ${this.gatewayConfig.parallelToolCalling})`);
     }
 
+    // Add model-specific options (e.g., thinking configuration)
+    if (resolvedModel?.options?.thinking) {
+      requestOptions.thinking = resolvedModel.options.thinking;
+      this.outputChannel.appendLine(`Thinking enabled: type=${resolvedModel.options.thinking.type}, budgetTokens=${resolvedModel.options.thinking.budgetTokens || 'default'}`);
+    }
+
     if (options.modelOptions) {
       Object.assign(requestOptions, options.modelOptions);
     }
@@ -1119,22 +1193,46 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     const debugRequest = this.safeStringify(requestOptions);
     this.outputChannel.appendLine(debugRequest.length > 2000 ? `Request (truncated): ${debugRequest.substring(0, 2000)}...` : `Request: ${debugRequest}`);
 
+    // Check if using Anthropic format
+    const provider = this.configManager.getProvider(providerId);
+    const isAnthropic = provider?.apiFormat === 'anthropic';
+
     try {
       let totalContent = '';
       let totalToolCalls = 0;
 
-      for await (const chunk of client.streamChatCompletion(requestOptions as unknown as OpenAIChatCompletionRequest, token)) {
-        if (token.isCancellationRequested) { break; }
+      if (isAnthropic && client instanceof AnthropicClient) {
+        // Use Anthropic streaming format
+        for await (const chunk of client.streamMessages(requestOptions as unknown as Parameters<AnthropicClient['streamMessages']>[0], token)) {
+          if (token.isCancellationRequested) { break; }
 
-        if (chunk.content) {
-          totalContent += chunk.content;
-          progress.report(new vscode.LanguageModelTextPart(chunk.content));
+          if (chunk.content) {
+            totalContent += chunk.content;
+            progress.report(new vscode.LanguageModelTextPart(chunk.content));
+          }
+
+          if (chunk.finished_tool_calls?.length) {
+            for (const toolCall of chunk.finished_tool_calls) {
+              totalToolCalls++;
+              this.processToolCall(toolCall, progress);
+            }
+          }
         }
+      } else if (client instanceof GatewayClient) {
+        // Use OpenAI streaming format
+        for await (const chunk of client.streamChatCompletion(requestOptions as unknown as OpenAIChatCompletionRequest, token)) {
+          if (token.isCancellationRequested) { break; }
 
-        if (chunk.finished_tool_calls?.length) {
-          for (const toolCall of chunk.finished_tool_calls) {
-            totalToolCalls++;
-            this.processToolCall(toolCall, progress);
+          if (chunk.content) {
+            totalContent += chunk.content;
+            progress.report(new vscode.LanguageModelTextPart(chunk.content));
+          }
+
+          if (chunk.finished_tool_calls?.length) {
+            for (const toolCall of chunk.finished_tool_calls) {
+              totalToolCalls++;
+              this.processToolCall(toolCall, progress);
+            }
           }
         }
       }
@@ -1259,7 +1357,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
    */
   private reloadConfig(): void {
     this.gatewayConfig = this.loadDefaultConfig();
-    this.client.updateConfig(this.gatewayConfig);
+    this.defaultClient.updateConfig(this.gatewayConfig);
+    // Clear client cache to force recreation with new config
+    this.clients.clear();
     this.outputChannel.appendLine('Configuration reloaded');
   }
 }

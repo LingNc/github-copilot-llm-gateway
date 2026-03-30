@@ -35,6 +35,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   private readonly currentToolSchemas: Map<string, unknown> = new Map();
   // Track if we've shown the welcome notification this session
   private hasShownWelcomeNotification = false;
+  // Cache tiktoken encoder for reuse
+  private tiktokenEncoder: ReturnType<typeof getEncoding> | null = null;
 
   constructor(
     context: vscode.ExtensionContext,
@@ -1360,10 +1362,12 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     }
 
     try {
-      // Try to use tiktoken for accurate token counting
-      // Use cl100k_base encoding which is used by GPT-4, GPT-3.5, and many other models
-      const encoder = getEncoding('cl100k_base');
-      const tokens = encoder.encode(content);
+      // Lazy initialize tiktoken encoder
+      if (!this.tiktokenEncoder) {
+        // Use cl100k_base encoding which is used by GPT-4, GPT-3.5, and many other models
+        this.tiktokenEncoder = getEncoding('cl100k_base');
+      }
+      const tokens = this.tiktokenEncoder.encode(content);
       const estimatedTokens = tokens.length;
 
       this.outputChannel.appendLine(`Token estimate (tiktoken): ${estimatedTokens} tokens`);

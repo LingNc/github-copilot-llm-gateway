@@ -18,6 +18,7 @@ export class ProviderManager {
   private context: vscode.ExtensionContext;
   private providerDisposable?: vscode.Disposable;
   private provider?: GatewayProvider;
+  private isReloading = false; // Prevent recursive reloads
 
   constructor(
     context: vscode.ExtensionContext,
@@ -62,24 +63,34 @@ export class ProviderManager {
    * Reload configuration and re-register provider
    */
   public async reload(): Promise<void> {
+    if (this.isReloading) {
+      this.outputChannel.appendLine('Reload already in progress, skipping...');
+      return;
+    }
+
+    this.isReloading = true;
     this.outputChannel.appendLine('Reloading provider...');
 
-    // Dispose existing provider
-    this.dispose();
+    try {
+      // Dispose existing provider
+      this.dispose();
 
-    // Reload config and re-register
-    const result = this.configManager.reloadConfig();
-    await this.registerProvider();
+      // Reload config and re-register
+      const result = this.configManager.reloadConfig();
+      await this.registerProvider();
 
-    if (result.migrated) {
-      this.outputChannel.appendLine('Configuration migrated from legacy format.');
+      if (result.migrated) {
+        this.outputChannel.appendLine('Configuration migrated from legacy format.');
+      }
+
+      for (const warning of result.warnings) {
+        this.outputChannel.appendLine(`Warning: ${warning}`);
+      }
+
+      this.outputChannel.appendLine('Provider reloaded.');
+    } finally {
+      this.isReloading = false;
     }
-
-    for (const warning of result.warnings) {
-      this.outputChannel.appendLine(`Warning: ${warning}`);
-    }
-
-    this.outputChannel.appendLine('Provider reloaded.');
   }
 
   /**
@@ -100,6 +111,10 @@ export class ProviderManager {
    * Handle configuration changes
    */
   private async handleConfigChange(config: MultiProviderConfig): Promise<void> {
+    if (this.isReloading) {
+      this.outputChannel.appendLine('Configuration changed during reload, ignoring...');
+      return;
+    }
     this.outputChannel.appendLine('Configuration changed, updating provider...');
     await this.reload();
   }

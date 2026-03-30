@@ -166,7 +166,7 @@
             "slash",
             "bracket"
           ],
-          "default": "bracket",
+          "default": "slash",
           "description": "%config.providerNameStyle.description%",
           "markdownDescription": "%config.providerNameStyle.markdownDescription%",
           "order": 11

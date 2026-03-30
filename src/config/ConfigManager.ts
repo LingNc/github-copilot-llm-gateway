@@ -192,7 +192,7 @@ export class ConfigManager {
     // Load from new format
     const providers = this.config.get<Record<string, ProviderConfig>>('providers', {});
     const showProviderPrefix = this.config.get<boolean>('showProviderPrefix', true);
-    const providerNameStyle = this.config.get<ProviderNameStyle>('providerNameStyle', 'bracket');
+    const providerNameStyle = this.config.get<ProviderNameStyle>('providerNameStyle', 'slash');
     const configMode = this.config.get<ConfigMode>('configMode', 'config-priority');
 
     const multiConfig: MultiProviderConfig = {

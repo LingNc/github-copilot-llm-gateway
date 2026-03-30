@@ -85,7 +85,7 @@ export function migrateToMultiProvider(legacy: LegacyConfig): MultiProviderConfi
       'default': defaultProvider,
     },
     showProviderPrefix: false,
-    providerNameStyle: 'bracket',
+    providerNameStyle: 'slash',
     configMode: 'api-priority', // Use API-priority for legacy to maintain behavior
   };
 }
@@ -98,7 +98,7 @@ export function createEmptyMultiProviderConfig(): MultiProviderConfig {
   return {
     providers: {},
     showProviderPrefix: false,
-    providerNameStyle: 'bracket',
+    providerNameStyle: 'slash',
     configMode: 'config-only',
   };
 }
@@ -133,7 +133,7 @@ export function createExampleMultiProviderConfig(): MultiProviderConfig {
       },
     },
     showProviderPrefix: false,
-    providerNameStyle: 'bracket',
+    providerNameStyle: 'slash',
     configMode: 'config-only',
   };
 }

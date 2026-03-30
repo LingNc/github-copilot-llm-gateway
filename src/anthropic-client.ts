@@ -30,9 +30,10 @@ interface StreamingToolCall {
  */
 interface StreamState {
   textContent: string;
+  thinkingContent: string;
   toolCalls: Map<number, StreamingToolCall>;
   currentBlockIndex: number | null;
-  currentBlockType: 'text' | 'tool_use' | null;
+  currentBlockType: 'text' | 'thinking' | 'tool_use' | null;
   requestId: string;
   inputTokens: number;
   outputTokens: number;
@@ -153,6 +154,7 @@ export class AnthropicClient {
   private createStreamState(): StreamState {
     return {
       textContent: '',
+      thinkingContent: '',
       toolCalls: new Map(),
       currentBlockIndex: null,
       currentBlockType: null,
@@ -168,7 +170,7 @@ export class AnthropicClient {
   private processStreamEvent(
     event: AnthropicStreamEvent,
     state: StreamState
-  ): { content: string; tool_calls: StreamingToolCall[] } | null {
+  ): { content: string; thinking?: string; tool_calls: StreamingToolCall[] } | null {
     switch (event.type) {
       case 'message_start':
         state.inputTokens = event.message.usage?.input_tokens || 0;
@@ -178,6 +180,8 @@ export class AnthropicClient {
         state.currentBlockIndex = event.index;
         if (event.content_block.type === 'text') {
           state.currentBlockType = 'text';
+        } else if (event.content_block.type === 'thinking') {
+          state.currentBlockType = 'thinking';
         } else if (event.content_block.type === 'tool_use') {
           state.currentBlockType = 'tool_use';
           state.toolCalls.set(event.index, {
@@ -192,7 +196,10 @@ export class AnthropicClient {
         if (state.currentBlockIndex === event.index) {
           if (event.delta.type === 'text_delta' && state.currentBlockType === 'text') {
             state.textContent += event.delta.text;
-            return { content: event.delta.text, tool_calls: [] };
+            return { content: event.delta.text, thinking: undefined, tool_calls: [] };
+          } else if (event.delta.type === 'thinking_delta' && state.currentBlockType === 'thinking') {
+            state.thinkingContent += event.delta.thinking;
+            return { content: '', thinking: event.delta.thinking, tool_calls: [] };
           } else if (event.delta.type === 'input_json_delta' && state.currentBlockType === 'tool_use') {
             const toolCall = state.toolCalls.get(event.index);
             if (toolCall) {
@@ -247,7 +254,7 @@ export class AnthropicClient {
       tool_choice?: { type: 'auto' | 'any' | 'tool'; name?: string };
     },
     cancellationToken: { isCancellationRequested: boolean }
-  ): AsyncGenerator<{ content: string; tool_calls: StreamingToolCall[]; finished_tool_calls: StreamingToolCall[]; usage?: { prompt_tokens: number; completion_tokens: number } }, void, unknown> {
+  ): AsyncGenerator<{ content: string; thinking?: string; tool_calls: StreamingToolCall[]; finished_tool_calls: StreamingToolCall[]; usage?: { prompt_tokens: number; completion_tokens: number } }, void, unknown> {
     const baseUrl = this.config.baseURL.replace(/\/$/, '');
     const url = `${baseUrl}/messages`;
 
@@ -344,7 +351,7 @@ export class AnthropicClient {
   private processSSELine(
     line: string,
     state: StreamState
-  ): { content: string; tool_calls: StreamingToolCall[]; finished_tool_calls: StreamingToolCall[]; usage?: { prompt_tokens: number; completion_tokens: number } } | null {
+  ): { content: string; thinking?: string; tool_calls: StreamingToolCall[]; finished_tool_calls: StreamingToolCall[]; usage?: { prompt_tokens: number; completion_tokens: number } } | null {
     const trimmed = line.trim();
 
     if (trimmed === '' || trimmed === 'data: [DONE]') {
@@ -375,6 +382,7 @@ export class AnthropicClient {
       if (result) {
         return {
           content: result.content,
+          thinking: result.thinking,
           tool_calls: result.tool_calls,
           finished_tool_calls: [],
         };

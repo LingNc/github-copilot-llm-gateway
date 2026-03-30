@@ -1213,6 +1213,13 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
             progress.report(new vscode.LanguageModelTextPart(chunk.content));
           }
 
+          // Handle thinking content from Claude 3.7+
+          if (chunk.thinking) {
+            totalContent += chunk.thinking;
+            // Report thinking as text content since LanguageModelThinkingPart may not be available
+            progress.report(new vscode.LanguageModelTextPart(chunk.thinking));
+          }
+
           // Capture usage data
           if (chunk.usage) {
             promptTokens = chunk.usage.prompt_tokens ?? promptTokens;

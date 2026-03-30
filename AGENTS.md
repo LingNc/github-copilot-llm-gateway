@@ -61,6 +61,7 @@ npm run package
 - [x] Anthropic API 支持
 - [x] 模型 thinking 配置支持
 - [x] Copilot 上下文 token 显示修复（通过 progress.usage() 报告）
+- [x] Claude 3.7 Thinking 内容支持
 - [ ] 完整测试和 bug 修复
 
 ### 最新进度
@@ -73,6 +74,7 @@ npm run package
 - 向后兼容旧配置
 - **新增**: Anthropic API 格式支持（apiFormat: 'anthropic'）
 - **新增**: Token 使用量显示修复（通过 progress.usage() 报告给 VS Code）
+- **新增**: Claude 3.7 Thinking 内容支持（处理 thinking 类型 content block）
 
 ### 文件清单
 | 文件 | 说明 |

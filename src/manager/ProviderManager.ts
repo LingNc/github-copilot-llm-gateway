@@ -127,7 +127,8 @@ export class ProviderManager {
       // Create GatewayProvider instance
       this.provider = new GatewayProvider(
         this.context,
-        this.configManager
+        this.configManager,
+        this.outputChannel
       );
 
       // Register with VS Code - use the vendor ID declared in package.json

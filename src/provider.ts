@@ -20,7 +20,7 @@ import { ResolvedModel, ConfigMode } from './config/types';
 export class GatewayProvider implements vscode.LanguageModelChatProvider {
   private readonly client: GatewayClient;
   private gatewayConfig: GatewayConfig;
-  private readonly outputChannel: vscode.OutputChannel;
+  private outputChannel: vscode.OutputChannel;
   private configManager: ConfigManager;
   // Store tool schemas for the current request to fill missing required properties
   private readonly currentToolSchemas: Map<string, unknown> = new Map();
@@ -29,10 +29,11 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
   constructor(
     context: vscode.ExtensionContext,
-    configManager: ConfigManager
+    configManager: ConfigManager,
+    outputChannel: vscode.OutputChannel
   ) {
     this.configManager = configManager;
-    this.outputChannel = vscode.window.createOutputChannel('GitHub Copilot LLM Gateway');
+    this.outputChannel = outputChannel;
 
     // Load default config from first provider or global settings
     this.gatewayConfig = this.loadDefaultConfig();

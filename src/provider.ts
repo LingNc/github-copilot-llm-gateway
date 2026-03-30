@@ -4,7 +4,6 @@
  */
 
 import * as vscode from 'vscode';
-import { encodingForModel, getEncoding } from 'js-tiktoken';
 import { GatewayClient } from './client';
 import { AnthropicClient } from './anthropic-client';
 import {
@@ -35,8 +34,6 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   private readonly currentToolSchemas: Map<string, unknown> = new Map();
   // Track if we've shown the welcome notification this session
   private hasShownWelcomeNotification = false;
-  // Cache tiktoken encoder for reuse
-  private tiktokenEncoder: ReturnType<typeof getEncoding> | null = null;
 
   constructor(
     context: vscode.ExtensionContext,
@@ -1316,13 +1313,19 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           });
         }
 
-        progress.usage({
-          promptTokens,
-          completionTokens,
-          outputBuffer: safeMaxOutputTokens,
-          promptTokenDetails,
-        });
-        this.outputChannel.appendLine(`Token usage reported: prompt=${promptTokens}, completion=${completionTokens}, outputBuffer=${safeMaxOutputTokens}`);
+        // Report token usage if the API supports it
+        // Note: progress.usage is part of the proposed API and may not be available in all VS Code versions
+        if (typeof (progress as any).usage === 'function') {
+          (progress as any).usage({
+            promptTokens,
+            completionTokens,
+            outputBuffer: safeMaxOutputTokens,
+            promptTokenDetails,
+          });
+          this.outputChannel.appendLine(`Token usage reported: prompt=${promptTokens}, completion=${completionTokens}, outputBuffer=${safeMaxOutputTokens}`);
+        } else {
+          this.outputChannel.appendLine(`Token usage (API not supported): prompt=${promptTokens}, completion=${completionTokens}`);
+        }
       }
 
       if (totalContent.length === 0 && totalToolCalls === 0) {
@@ -1362,12 +1365,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     }
 
     try {
-      // Lazy initialize tiktoken encoder
-      if (!this.tiktokenEncoder) {
-        // Use cl100k_base encoding which is used by GPT-4, GPT-3.5, and many other models
-        this.tiktokenEncoder = getEncoding('cl100k_base');
-      }
-      const tokens = this.tiktokenEncoder.encode(content);
+      // Dynamically import tiktoken only when needed
+      const { getEncoding } = await import('js-tiktoken');
+      const encoder = getEncoding('cl100k_base');
+      const tokens = encoder.encode(content);
       const estimatedTokens = tokens.length;
 
       this.outputChannel.appendLine(`Token estimate (tiktoken): ${estimatedTokens} tokens`);

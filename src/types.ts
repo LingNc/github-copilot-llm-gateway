@@ -99,6 +99,11 @@ export interface GatewayConfig {
 export type ConfigMode = 'config-only' | 'config-priority' | 'api-priority';
 
 /**
+ * Provider name display style
+ */
+export type ProviderNameStyle = 'slash' | 'bracket';
+
+/**
  * Model capabilities configuration
  */
 export interface ModelCapabilities {
@@ -164,6 +169,7 @@ export interface ProviderConfig {
 export interface MultiProviderConfig {
   providers: Record<string, ProviderConfig>;
   showProviderPrefix: boolean;
+  providerNameStyle: ProviderNameStyle;
   configMode: ConfigMode;
 }
 

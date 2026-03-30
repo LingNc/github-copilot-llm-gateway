@@ -11,7 +11,7 @@ import {
   ModelConfig,
 } from './types';
 import { ConfigManager } from './config/ConfigManager';
-import { ResolvedModel, ConfigMode } from './config/types';
+import { ResolvedModel, ConfigMode, ProviderNameStyle } from './config/types';
 
 /**
  * Language model provider for OpenAI-compatible inference servers
@@ -475,8 +475,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   ): Promise<vscode.LanguageModelChatInformation[]> {
     const configMode = this.configManager.getConfigMode();
     const showProviderPrefix = this.configManager.shouldShowProviderPrefix();
+    const providerNameStyle = this.configManager.getProviderNameStyle();
 
-    this.outputChannel.appendLine(`Fetching models from all providers (mode: ${configMode})...`);
+    this.outputChannel.appendLine(`Fetching models from all providers (mode: ${configMode}, style: ${providerNameStyle})...`);
 
     const allModels: vscode.LanguageModelChatInformation[] = [];
     const providers = this.configManager.getProviders();
@@ -493,6 +494,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           provider.id,
           configMode,
           showProviderPrefix,
+          providerNameStyle,
           options,
           token
         );
@@ -514,6 +516,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     providerId: string,
     configMode: ConfigMode,
     showProviderPrefix: boolean,
+    providerNameStyle: ProviderNameStyle,
     options: { silent: boolean; },
     token: vscode.CancellationToken
   ): Promise<vscode.LanguageModelChatInformation[]> {
@@ -525,16 +528,16 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     switch (configMode) {
       case 'config-only':
-        return this.buildModelInfoFromConfig(providerId, configuredModels, showProviderPrefix);
+        return this.buildModelInfoFromConfig(providerId, configuredModels, showProviderPrefix, providerNameStyle);
 
       case 'config-priority':
-        return await this.fetchModelsWithConfigPriority(providerId, configuredModels, showProviderPrefix, options, token);
+        return await this.fetchModelsWithConfigPriority(providerId, configuredModels, showProviderPrefix, providerNameStyle, options, token);
 
       case 'api-priority':
-        return await this.fetchModelsWithApiPriority(providerId, configuredModels, showProviderPrefix, options, token);
+        return await this.fetchModelsWithApiPriority(providerId, configuredModels, showProviderPrefix, providerNameStyle, options, token);
 
       default:
-        return this.buildModelInfoFromConfig(providerId, configuredModels, showProviderPrefix);
+        return this.buildModelInfoFromConfig(providerId, configuredModels, showProviderPrefix, providerNameStyle);
     }
   }
 
@@ -544,13 +547,18 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   private buildModelInfoFromConfig(
     providerId: string,
     models: ResolvedModel[],
-    showProviderPrefix: boolean
+    showProviderPrefix: boolean,
+    providerNameStyle: ProviderNameStyle = 'bracket'
   ): vscode.LanguageModelChatInformation[] {
     return models.map((model) => {
       this.outputChannel.appendLine(`  Building model info: ${model.id}, context=${model.limit.context}, output=${model.limit.output}`);
+      // Format name based on style: 'slash' = provider/model, 'bracket' = [provider] model
+      const formattedName = showProviderPrefix
+        ? (providerNameStyle === 'slash' ? `${providerId}/${model.name}` : `[${providerId}] ${model.name}`)
+        : model.name;
       return {
         id: model.id,
-        name: showProviderPrefix ? `[${providerId}] ${model.name}` : model.name,
+        name: formattedName,
         family: providerId, // Use providerId as family for grouping
         maxInputTokens: model.limit.context,
         maxOutputTokens: model.limit.output,
@@ -570,16 +578,23 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     providerId: string,
     configuredModels: ResolvedModel[],
     showProviderPrefix: boolean,
+    providerNameStyle: ProviderNameStyle,
     options: { silent: boolean; },
     token: vscode.CancellationToken
   ): Promise<vscode.LanguageModelChatInformation[]> {
     // First, get configured models as base
     const modelMap = new Map<string, vscode.LanguageModelChatInformation>();
 
+    // Helper to format name based on style
+    const formatName = (name: string) => {
+      if (!showProviderPrefix) return name;
+      return providerNameStyle === 'slash' ? `${providerId}/${name}` : `[${providerId}] ${name}`;
+    };
+
     for (const model of configuredModels) {
       modelMap.set(model.id, {
         id: model.id,
-        name: showProviderPrefix ? `[${providerId}] ${model.name}` : model.name,
+        name: formatName(model.name),
         family: providerId,
         maxInputTokens: model.limit.context,
         maxOutputTokens: model.limit.output,
@@ -605,7 +620,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
           modelMap.set(apiModel.id, {
             id: apiModel.id,
-            name: showProviderPrefix ? `[${providerId}] ${apiModel.id}` : apiModel.id,
+            name: formatName(apiModel.id),
             family: providerId,
             maxInputTokens: defaultMaxTokens,
             maxOutputTokens: defaultMaxOutput,
@@ -658,6 +673,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     providerId: string,
     configuredModels: ResolvedModel[],
     showProviderPrefix: boolean,
+    providerNameStyle: ProviderNameStyle,
     options: { silent: boolean; },
     token: vscode.CancellationToken
   ): Promise<vscode.LanguageModelChatInformation[]> {
@@ -667,6 +683,12 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     for (const model of configuredModels) {
       modelMap.set(model.id, model);
     }
+
+    // Helper to format name based on style
+    const formatName = (name: string) => {
+      if (!showProviderPrefix) return name;
+      return providerNameStyle === 'slash' ? `${providerId}/${name}` : `[${providerId}] ${name}`;
+    };
 
     try {
       const client = this.getClient(providerId);
@@ -679,9 +701,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         // API priority: use API model id, but config values if available
         result.push({
           id: apiModel.id,
-          name: showProviderPrefix
-            ? `[${providerId}] ${configuredModel?.name ?? apiModel.id}`
-            : (configuredModel?.name ?? apiModel.id),
+          name: formatName(configuredModel?.name ?? apiModel.id),
           family: providerId,
           maxInputTokens: configuredModel?.limit.context ?? this.gatewayConfig.defaultMaxTokens,
           maxOutputTokens: configuredModel?.limit.output ?? this.gatewayConfig.defaultMaxOutputTokens,
@@ -706,7 +726,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       }
 
       // Fallback to config
-      return this.buildModelInfoFromConfig(providerId, configuredModels, showProviderPrefix);
+      return this.buildModelInfoFromConfig(providerId, configuredModels, showProviderPrefix, providerNameStyle);
     }
   }
 

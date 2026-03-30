@@ -203,7 +203,8 @@ Your self-hosted models now appear in Copilot Chat. Select one and start coding 
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `showProviderPrefix` | boolean | `false` | Show `provider/model` format |
+| `showProviderPrefix` | boolean | `true` | Show provider prefix in model selector |
+| `providerNameStyle` | string | `"bracket"` | Provider name display style: `"slash"` (provider/model) or `"bracket"` ([provider] model) |
 | `configMode` | string | `"config-priority"` | Model source mode |
 | `requestTimeout` | number | `60000` | Request timeout in ms |
 | `parallelToolCalling` | boolean | `true` | Allow parallel tool calls |

@@ -131,6 +131,34 @@ npm run package
 
 **优先级**: 中（影响用户体验，但不影响功能）
 
+#### 切换模型时自动隐藏 Token 状态栏
+
+**需求描述**: 当用户在 Copilot Chat 中切换到非 LLM Gateway 提供的模型时，自动隐藏当前显示的 Token 状态栏
+
+**背景**:
+- 目前 Token 状态栏只在当前会话中显示
+- 当用户切换到其他模型（如 GitHub Copilot 官方模型或其他扩展提供的模型）时，状态栏仍然显示，但数据已过期
+- 这会造成误导，显示的是之前模型的 Token 使用情况
+
+**实现思路**:
+1. 监听模型切换事件（如果有 VS Code API 支持）
+2. 或通过检测当前活动的 Chat Participant 来判断
+3. 当检测到切换到非当前 GatewayProvider 的模型时，调用 `tokenStatusBarItem.hide()`
+4. 当再次切换回 GatewayProvider 的模型时，恢复显示
+
+**相关 API 调研**:
+- `vscode.chat.onDidChangeActiveChatParticipant` (如果有)
+- `vscode.window.onDidChangeActiveTextEditor` (辅助判断)
+- 在 `provideLanguageModelResponse` 中记录当前 session 的 provider
+
+**相关代码位置**:
+- `src/provider.ts`: `updateTokenStatusBar()` 方法
+- `src/extension.ts`: 添加事件监听
+
+**预估工作量**: 2-3 小时
+
+**优先级**: 低（功能增强，非必要）
+
 ### 最新进度
 项目已重构为支持多厂商配置系统：
 - 支持配置多个不同 baseURL 的厂商

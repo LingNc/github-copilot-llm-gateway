@@ -170,11 +170,11 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     this.currentModelMaxTokens = maxTokens;
 
     const percentage = Math.round((usedTokens / maxTokens) * 100);
-    // Status bar color: blue (safe), yellow (warning), red (critical)
+    // Status bar color: green (safe), yellow (warning), red (critical)
     // Using VS Code theme colors for better integration
     const color = percentage > 90 ? new vscode.ThemeColor('statusBarItem.errorForeground')
       : percentage > 70 ? new vscode.ThemeColor('statusBarItem.warningForeground')
-      : new vscode.ThemeColor('charts.blue');
+      : new vscode.ThemeColor('statusBarItem.prominentForeground');
 
     this.tokenStatusBarItem.text = `$(symbol-keyword) ${percentage}%`;
     this.tokenStatusBarItem.color = color;

@@ -207,9 +207,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     const filled = Math.round((percentage / 100) * 20);
     const empty = 20 - filled;
-    const barFilled = '<span style="color:#007acc">█</span>'.repeat(filled);
-    const barEmpty = '<span style="color:var(--vscode-descriptionForeground)">▒</span>'.repeat(empty);
-    tooltip.appendMarkdown(`${barFilled}${barEmpty}\n\n`);
+    // Use VS Code theme blue color for the progress bar
+    const barFilled = '█'.repeat(filled);
+    const barEmpty = '▒'.repeat(empty);
+    tooltip.appendMarkdown(`<span style="color:var(--vscode-charts-blue)">${barFilled}</span><span style="color:var(--vscode-descriptionForeground)">${barEmpty}</span>\n\n`);
 
     const remaining = maxTokens - usedTokens;
     tooltip.appendMarkdown(`${this.formatNumber(remaining)} ${this.getLocalizedString('token.remainingForResponse')}\n\n`);

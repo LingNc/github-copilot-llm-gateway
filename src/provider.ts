@@ -91,7 +91,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         vscode.StatusBarAlignment.Right,
         100
       );
-      this.tokenStatusBarItem.command = 'github.copilot.llm-gateway.compactContext';
+      this.tokenStatusBarItem.command = undefined;
       context.subscriptions.push(this.tokenStatusBarItem);
       this.updateStatusBarVisibility();
     }
@@ -203,7 +203,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     const filled = Math.round((percentage / 100) * 20);
     const empty = 20 - filled;
-    const barFilled = '<span style="color:var(--vscode-foreground)">█</span>'.repeat(filled);
+    const barFilled = '<span style="color:#007acc">█</span>'.repeat(filled);
     const barEmpty = '<span style="color:var(--vscode-descriptionForeground)">▒</span>'.repeat(empty);
     tooltip.appendMarkdown(`${barFilled}${barEmpty}\n\n`);
 

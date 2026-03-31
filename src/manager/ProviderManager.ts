@@ -1,12 +1,8 @@
-/**
- * Provider Manager
- * Manages a single GatewayProvider that handles all configured providers
- */
-
 import * as vscode from 'vscode';
 import { ConfigManager } from '../config/ConfigManager';
 import { GatewayProvider } from '../provider';
 import { MultiProviderConfig } from '../config/types';
+import { TokenUsageViewProvider } from '../views/TokenUsageView';
 
 /**
  * Provider Manager class
@@ -18,6 +14,7 @@ export class ProviderManager {
   private context: vscode.ExtensionContext;
   private providerDisposable?: vscode.Disposable;
   private provider?: GatewayProvider;
+  private tokenUsageProvider?: TokenUsageViewProvider;
   private isReloading = false; // Prevent recursive reloads
 
   constructor(
@@ -105,6 +102,17 @@ export class ProviderManager {
    */
   public getProvider(): GatewayProvider | undefined {
     return this.provider;
+  }
+
+  /**
+   * Set the token usage view provider
+   */
+  public setTokenUsageProvider(provider: TokenUsageViewProvider): void {
+    this.tokenUsageProvider = provider;
+    // Pass it to the GatewayProvider if it exists
+    if (this.provider) {
+      this.provider.setTokenUsageProvider(provider);
+    }
   }
 
   /**

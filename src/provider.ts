@@ -1,9 +1,5 @@
-/**
- * Provider for multi-provider configuration support
- * Each GatewayProvider instance represents a single provider
- */
-
 import * as vscode from 'vscode';
+import type { getEncoding } from 'js-tiktoken';
 import { GatewayClient } from './client';
 import { AnthropicClient } from './anthropic-client';
 import {
@@ -14,6 +10,7 @@ import {
 } from './types';
 import { ConfigManager } from './config/ConfigManager';
 import { ResolvedModel, ConfigMode, ProviderNameStyle } from './config/types';
+import { TokenUsageViewProvider } from './views/TokenUsageView';
 
 /**
  * Union type for either client type
@@ -34,6 +31,24 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   private readonly currentToolSchemas: Map<string, unknown> = new Map();
   // Track if we've shown the welcome notification this session
   private hasShownWelcomeNotification = false;
+  // Cache tiktoken encoder to avoid repeated imports
+  private tiktokenEncoder: ReturnType<typeof getEncoding> | null = null;
+  private tiktokenLoadAttempted = false;
+  // Debug counter for token count calls
+  private tokenCountCallCount = 0;
+  private lastTokenCountLogTime = 0;
+  // Track total prompt tokens for the current session
+  private currentSessionPromptTokens = 0;
+  private currentSessionCompletionTokens = 0;
+  // Cache debug logs setting to avoid repeated config lookups
+  private debugLogsEnabled = false;
+  // Status bar item for token usage display
+  private tokenStatusBarItem: vscode.StatusBarItem | undefined;
+  // Current session token statistics
+  private currentContextTokens = 0;
+  private currentModelMaxTokens = 0;
+  // Token usage view provider
+  private tokenUsageProvider?: TokenUsageViewProvider;
 
   constructor(
     context: vscode.ExtensionContext,
@@ -47,6 +62,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     this.gatewayConfig = this.loadDefaultConfig();
     this.defaultClient = new GatewayClient(this.gatewayConfig);
 
+    // Initialize status bar item
+    this.initializeStatusBar(context);
+
     // Watch for configuration changes
     context.subscriptions.push(
       vscode.workspace.onDidChangeConfiguration((e: vscode.ConfigurationChangeEvent) => {
@@ -56,6 +74,215 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         }
       })
     );
+
+    // Initialize cached debug setting
+    this.updateDebugSettings();
+  }
+
+  /**
+   * Initialize status bar item for token display
+   */
+  private initializeStatusBar(context: vscode.ExtensionContext): void {
+    const config = vscode.workspace.getConfiguration('github.copilot.llm-gateway');
+    const tokenStatisticsEnabled = config.get<boolean>('enableTokenStatistics', true);
+
+    if (tokenStatisticsEnabled) {
+      this.tokenStatusBarItem = vscode.window.createStatusBarItem(
+        vscode.StatusBarAlignment.Right,
+        100
+      );
+      this.tokenStatusBarItem.command = undefined;
+      context.subscriptions.push(this.tokenStatusBarItem);
+      this.updateStatusBarVisibility();
+    }
+  }
+
+  /**
+   * Update status bar visibility based on active chat session
+   */
+  private updateStatusBarVisibility(): void {
+    if (!this.tokenStatusBarItem) return;
+
+    // Show status bar when there's an active chat session
+    const hasActiveSession = vscode.window.visibleTextEditors.length > 0 ||
+                             vscode.window.activeTerminal !== undefined;
+    if (hasActiveSession) {
+      this.tokenStatusBarItem.show();
+    } else {
+      this.tokenStatusBarItem.hide();
+    }
+  }
+
+  /**
+   * Format number with K/M suffix
+   */
+  private formatNumber(num: number): string {
+    if (num >= 1000000) {
+      return (num / 1000000).toFixed(1) + 'M';
+    }
+    if (num >= 1000) {
+      return (num / 1000).toFixed(1) + 'K';
+    }
+    return num.toString();
+  }
+
+  /**
+   * Get localized string safely
+   */
+  private getLocalizedString(key: string, ...args: string[]): string {
+    try {
+      const result = vscode.l10n.t(key, args);
+      // If the result is the same as key, try manual lookup
+      if (result === key) {
+        // Fallback to known translations
+        const translations: Record<string, string> = {
+          'token.contextWindow': '上下文窗口',
+          'token.tokens': '个令牌',
+          'token.remainingForResponse': '保留用于响应',
+          'token.system': 'System',
+          'token.userContext': 'User Context',
+          'token.compactContext': '整理对话上下文',
+        };
+        return translations[key] || key;
+      }
+      return result;
+    } catch {
+      // Manual fallback
+      const translations: Record<string, string> = {
+        'token.contextWindow': '上下文窗口',
+        'token.tokens': '个令牌',
+        'token.remainingForResponse': '保留用于响应',
+        'token.system': 'System',
+        'token.userContext': 'User Context',
+        'token.compactContext': '整理对话上下文',
+      };
+      return translations[key] || key;
+    }
+  }
+
+  /**
+   * Update token status bar with current usage
+   */
+  private updateTokenStatusBar(usedTokens: number, maxTokens: number, details?: Array<{ category: string; label: string; percentage: number }>): void {
+    if (!this.tokenStatusBarItem) return;
+
+    this.currentContextTokens = usedTokens;
+    this.currentModelMaxTokens = maxTokens;
+
+    const percentage = Math.round((usedTokens / maxTokens) * 100);
+    // Status bar color: green (safe), yellow (warning), red (critical)
+    // Using VS Code theme colors for better integration
+    const color = percentage > 90 ? new vscode.ThemeColor('statusBarItem.errorForeground')
+      : percentage > 70 ? new vscode.ThemeColor('statusBarItem.warningForeground')
+      : new vscode.ThemeColor('statusBarItem.prominentForeground');
+
+    this.tokenStatusBarItem.text = `$(symbol-keyword) ${percentage}%`;
+    this.tokenStatusBarItem.color = color;
+
+    // Build tooltip using Markdown
+    const tooltip = new vscode.MarkdownString();
+    tooltip.supportHtml = true;
+    tooltip.isTrusted = true;
+
+    // Group details by category
+    const systemItems: Array<{ label: string; percentage: number }> = [];
+    const userContextItems: Array<{ label: string; percentage: number }> = [];
+
+    if (details && details.length > 0) {
+      for (const detail of details) {
+        const cat = detail.category.toLowerCase();
+        if (cat.includes('system')) {
+          systemItems.push(detail);
+        } else if (cat.includes('user')) {
+          userContextItems.push(detail);
+        }
+      }
+    }
+
+    tooltip.appendMarkdown(`### ${this.getLocalizedString('token.contextWindow')}\n\n`);
+
+    const tokenText = `${this.formatNumber(usedTokens)}/${this.formatNumber(maxTokens)} ${this.getLocalizedString('token.tokens')}`;
+    const percentageText = `${percentage}%`;
+    tooltip.appendMarkdown(`${tokenText}  **${percentageText}**\n\n`);
+
+    const filled = Math.round((percentage / 100) * 20);
+    const empty = 20 - filled;
+    // Use VS Code theme blue color for the progress bar
+    const barFilled = '█'.repeat(filled);
+    const barEmpty = '▒'.repeat(empty);
+    tooltip.appendMarkdown(`<span style="color:var(--vscode-charts-blue)">${barFilled}</span><span style="color:var(--vscode-descriptionForeground)">${barEmpty}</span>\n\n`);
+
+    const remaining = maxTokens - usedTokens;
+    tooltip.appendMarkdown(`${this.formatNumber(remaining)} ${this.getLocalizedString('token.remainingForResponse')}\n\n`);
+    tooltip.appendMarkdown(`---\n\n`);
+
+    if (systemItems.length > 0) {
+      tooltip.appendMarkdown(`**${this.getLocalizedString('token.system').toUpperCase()}**\n\n`);
+      for (const item of systemItems) {
+        const label = item.label.length > 26 ? item.label.substring(0, 23) + '...' : item.label;
+        const usedPercentage = usedTokens > 0 ? Math.round((item.percentage / 100) * (usedTokens / maxTokens) * 100) : 0;
+        tooltip.appendMarkdown(`${label.padEnd(25)} ${usedPercentage.toString().padStart(3)}%\n`);
+      }
+      tooltip.appendMarkdown(`\n`);
+    }
+
+    if (userContextItems.length > 0) {
+      tooltip.appendMarkdown(`**${this.getLocalizedString('token.userContext').toUpperCase()}**\n\n`);
+      for (const item of userContextItems) {
+        const label = item.label.length > 25 ? item.label.substring(0, 22) + '...' : item.label;
+        const usedPercentage = usedTokens > 0 ? Math.round((item.percentage / 100) * (usedTokens / maxTokens) * 100) : 0;
+        tooltip.appendMarkdown(`${label.padEnd(25)} ${usedPercentage.toString().padStart(3)}%\n`);
+      }
+      tooltip.appendMarkdown(`\n`);
+    }
+
+    tooltip.appendMarkdown(`---\n\n`);
+    tooltip.appendMarkdown(`[${this.getLocalizedString('token.compactContext')}](command:github.copilot.llm-gateway.compactContext)\n`);
+
+    this.tokenStatusBarItem.tooltip = tooltip;
+    this.tokenStatusBarItem.show();
+
+    // Update token details if provided
+    if (details) {
+      this.tokenDetails = details.map(d => ({
+        ...d,
+        tokens: Math.round((d.percentage / 100) * usedTokens)
+      }));
+    }
+
+    this.outputChannel.appendLine(`[Token Statistics] ${usedTokens}/${maxTokens} (${percentage}%)`);
+  }
+
+  /**
+   * Token detail categories for display
+   */
+  private tokenDetails: Array<{ category: string; label: string; tokens: number; percentage: number }> = [];
+
+  public async compactContext(): Promise<void> {
+    if (this.currentContextTokens === 0) {
+      vscode.window.showInformationMessage(vscode.l10n.t('token.noActiveSession'));
+      return;
+    }
+
+    this.outputChannel.appendLine('[Token Statistics] Opening Copilot Chat with /compact command');
+    await vscode.commands.executeCommand('workbench.panel.chat.view.copilot.focus');
+    await vscode.commands.executeCommand('type', { text: '/compact' });
+    await vscode.commands.executeCommand('workbench.action.chat.submit');
+  }
+
+  /**
+   * Set the token usage view provider
+   */
+  public setTokenUsageProvider(provider: TokenUsageViewProvider): void {
+    this.tokenUsageProvider = provider;
+  }
+
+  /**
+   * Update cached debug settings
+   */
+  private updateDebugSettings(): void {
+    const config = vscode.workspace.getConfiguration('github.copilot.llm-gateway');
+    this.debugLogsEnabled = config.get<boolean>('enableDebugLogs', false);
   }
 
   /**
@@ -1094,6 +1321,12 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     progress: vscode.Progress<vscode.LanguageModelResponsePart>,
     token: vscode.CancellationToken
   ): Promise<void> {
+    // Get configuration for this request (once per request)
+    const config = vscode.workspace.getConfiguration('github.copilot.llm-gateway');
+    const tokenStatisticsEnabled = config.get<boolean>('enableTokenStatistics', true);
+    // Update cached debug setting for this request
+    this.debugLogsEnabled = config.get<boolean>('enableDebugLogs', false);
+
     this.outputChannel.appendLine(`Sending chat request to model: ${model.id}`);
     this.outputChannel.appendLine(`Tool mode: ${options.toolMode}, Tools: ${options.tools?.length || 0}`);
     this.outputChannel.appendLine(`Message count: ${messages.length}`);
@@ -1150,12 +1383,31 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       .join('\n');
 
     const toolsOverhead = options.tools ? Math.ceil(this.safeStringify(options.tools).length / 4) : 0;
-    const estimatedInputTokens = await this.provideTokenCount(model, inputText, token);
+    const estimatedInputTokens = await this.provideTokenCount(model, inputText, token) + toolsOverhead;
     const safeMaxOutputTokens = this.calculateSafeMaxOutputTokens(estimatedInputTokens, toolsOverhead, model.id);
 
     this.outputChannel.appendLine(
       `Token estimate: input=${estimatedInputTokens}, tools=${toolsOverhead}, model_context=${modelMaxContext}, chosen_max_tokens=${safeMaxOutputTokens}`
     );
+
+    // Update token statistics display if enabled
+    if (tokenStatisticsEnabled) {
+      // Calculate estimated token breakdown
+      const systemPercentage = 13; // System Instructions ~13%
+      const toolsPercentage = options.tools ? Math.min(20, Math.ceil((toolsTokenEstimate / estimatedInputTokens) * 100)) : 0;
+      const messagesPercentage = 100 - systemPercentage - toolsPercentage;
+
+      const details = [
+        { category: 'System', label: 'System Instructions', percentage: systemPercentage },
+        ...(options.tools ? [{ category: 'System', label: 'Tool Definitions', percentage: toolsPercentage }] : []),
+        { category: 'User Context', label: 'Messages', percentage: messagesPercentage },
+        // TODO: Files and Tool Results require parsing message content to categorize
+        // { category: 'User Context', label: 'Files', percentage: 0 },
+        // { category: 'User Context', label: 'Tool Results', percentage: 0 },
+      ];
+
+      this.updateTokenStatusBar(estimatedInputTokens, modelMaxContext, details);
+    }
 
     // Build request
     const hasTools = (modelCapabilities?.toolCalling ?? this.gatewayConfig.enableToolCalling) &&
@@ -1200,6 +1452,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     try {
       let totalContent = '';
       let totalToolCalls = 0;
+      // Initialize with estimated values as fallback
+      // Many OpenAI-compatible APIs don't return usage data in streaming mode
+      let promptTokens = estimatedInputTokens || 0;
+      let completionTokens = 0;
 
       if (isAnthropic && client instanceof AnthropicClient) {
         // Use Anthropic streaming format
@@ -1209,6 +1465,19 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           if (chunk.content) {
             totalContent += chunk.content;
             progress.report(new vscode.LanguageModelTextPart(chunk.content));
+          }
+
+          // Handle thinking content from Claude 3.7+
+          if (chunk.thinking) {
+            totalContent += chunk.thinking;
+            // Report thinking as text content since LanguageModelThinkingPart may not be available
+            progress.report(new vscode.LanguageModelTextPart(chunk.thinking));
+          }
+
+          // Capture usage data (Anthropic usually provides this)
+          if (chunk.usage) {
+            promptTokens = chunk.usage.prompt_tokens ?? promptTokens;
+            completionTokens = chunk.usage.completion_tokens ?? completionTokens;
           }
 
           if (chunk.finished_tool_calls?.length) {
@@ -1228,6 +1497,19 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
             progress.report(new vscode.LanguageModelTextPart(chunk.content));
           }
 
+          // Handle reasoning_content (thinking) from OpenAI-compatible APIs (e.g., DeepSeek, Qwen)
+          if (chunk.reasoning) {
+            totalContent += chunk.reasoning;
+            progress.report(new vscode.LanguageModelTextPart(chunk.reasoning));
+          }
+
+          // Capture usage data if provided by API
+          // Note: Many OpenAI-compatible APIs don't include usage in streaming responses
+          if (chunk.usage) {
+            promptTokens = chunk.usage.prompt_tokens ?? promptTokens;
+            completionTokens = chunk.usage.completion_tokens ?? completionTokens;
+          }
+
           if (chunk.finished_tool_calls?.length) {
             for (const toolCall of chunk.finished_tool_calls) {
               totalToolCalls++;
@@ -1237,7 +1519,88 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         }
       }
 
+      // Estimate completion tokens from generated content if not provided by API
+      // Use ~4 characters per token as a rough estimate
+      if (completionTokens === 0 && totalContent.length > 0) {
+        completionTokens = Math.ceil(totalContent.length / 4);
+        this.outputChannel.appendLine(`Estimated completion tokens from content length: ${completionTokens}`);
+      }
+
       this.outputChannel.appendLine(`Completed chat request, received ${totalContent.length} characters, ${totalToolCalls} tool calls`);
+
+      // Report token usage to VS Code for context window display
+      if (promptTokens > 0 || completionTokens > 0) {
+        // Build basic prompt token details
+        // Note: This is a simplified breakdown. In a full implementation,
+        // we would categorize tokens by System, UserContext, etc.
+        const promptTokenDetails: Array<{ category: string; label: string; percentageOfPrompt: number }> = [];
+
+        // System tokens (estimated ~10% for system instructions)
+        const systemTokens = Math.floor(promptTokens * 0.1);
+        if (systemTokens > 0) {
+          promptTokenDetails.push({
+            category: 'System',
+            label: 'System Instructions',
+            percentageOfPrompt: Math.round((systemTokens / promptTokens) * 100),
+          });
+        }
+
+        // Tool definitions tokens (if tools are used)
+        if (options.tools && options.tools.length > 0) {
+          const toolTokens = Math.floor(promptTokens * 0.15);
+          promptTokenDetails.push({
+            category: 'System',
+            label: 'Tool Definitions',
+            percentageOfPrompt: Math.round((toolTokens / promptTokens) * 100),
+          });
+        }
+
+        // User context (remaining tokens)
+        const userTokens = promptTokens - systemTokens - (options.tools ? Math.floor(promptTokens * 0.15) : 0);
+        if (userTokens > 0) {
+          promptTokenDetails.push({
+            category: 'User Context',
+            label: 'Messages',
+            percentageOfPrompt: Math.round((userTokens / promptTokens) * 100),
+          });
+        }
+
+        // Report token usage via DataPart (experimental)
+        // This attempts to send token usage through a special MIME type that Copilot Chat might recognize
+        try {
+          const usageData = new TextEncoder().encode(JSON.stringify({
+            promptTokens,
+            completionTokens,
+            totalTokens: promptTokens + completionTokens,
+            outputBuffer: safeMaxOutputTokens,
+            timestamp: Date.now(),
+          }));
+          progress.report(new vscode.LanguageModelDataPart(usageData, 'application/vnd.github.copilot-llm-gateway.usage+json'));
+          this.outputChannel.appendLine(`Token usage reported via DataPart: prompt=${promptTokens}, completion=${completionTokens}`);
+        } catch (e) {
+          this.outputChannel.appendLine(`Token usage DataPart failed: ${e}`);
+        }
+
+        // Report token usage if the API supports it (fallback)
+        // Note: progress.usage is part of the proposed API and may not be available in all VS Code versions
+        // This feature is controlled by enableCopilotUsageReport setting (default: false) due to potential compatibility issues
+        const copilotUsageReportEnabled = vscode.workspace.getConfiguration('github.copilot.llm-gateway').get<boolean>('enableCopilotUsageReport', false);
+        if (copilotUsageReportEnabled && typeof (progress as any).usage === 'function') {
+          try {
+            (progress as any).usage({
+              promptTokens,
+              completionTokens,
+              outputBuffer: safeMaxOutputTokens,
+              promptTokenDetails,
+            });
+            this.outputChannel.appendLine(`Token usage reported via usage(): prompt=${promptTokens}, completion=${completionTokens}, outputBuffer=${safeMaxOutputTokens}`);
+          } catch (usageError) {
+            this.outputChannel.appendLine(`Token usage via usage() failed (API may have changed): ${usageError}`);
+          }
+        } else {
+          this.outputChannel.appendLine(`Token usage tracking: prompt=${promptTokens}, completion=${completionTokens}`);
+        }
+      }
 
       if (totalContent.length === 0 && totalToolCalls === 0) {
         await this.handleEmptyResponse(
@@ -1255,28 +1618,82 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   }
 
   /**
-   * Provide token count estimation
+   * Provide token count estimation using tiktoken
+   * Falls back to character-based estimation if tiktoken fails
    */
   async provideTokenCount(
     model: vscode.LanguageModelChatInformation,
     text: string | vscode.LanguageModelChatMessage,
     token: vscode.CancellationToken
   ): Promise<number> {
-    // Simple approximation: ~4 characters per token
+    this.tokenCountCallCount++;
+
     let content: string;
 
     if (typeof text === 'string') {
       content = text;
     } else {
-      // Filter and extract only text parts from the message content
-      content = text.content
-        .filter((part): part is vscode.LanguageModelTextPart => part instanceof vscode.LanguageModelTextPart)
-        .map((part) => part.value)
-        .join('');
+      // Fast path for string content messages
+      if (text.content.length === 1 && text.content[0] instanceof vscode.LanguageModelTextPart) {
+        content = text.content[0].value;
+      } else {
+        // Extract content from all part types, not just text parts
+        const parts: string[] = [];
+        for (const part of text.content) {
+          if (part instanceof vscode.LanguageModelTextPart) {
+            parts.push(part.value);
+          } else if (part instanceof vscode.LanguageModelToolResultPart) {
+            // Include tool result content
+            parts.push(`Tool result: ${part.callId}`);
+          } else if (part instanceof vscode.LanguageModelToolCallPart) {
+            // Include tool call content
+            parts.push(`Tool call: ${part.name}`);
+          } else if (part instanceof vscode.LanguageModelDataPart) {
+            // Include data part (usually binary data like images)
+            parts.push(`[Data: ${part.mimeType}, ${part.data.length} bytes]`);
+          }
+        }
+        content = parts.join('\n');
+      }
     }
 
-    const estimatedTokens = Math.ceil(content.length / 4);
-    return estimatedTokens;
+    // Log call details with stack trace to debug frequent calls (only if debug enabled)
+    if (this.debugLogsEnabled) {
+      const stack = new Error().stack?.split('\n').slice(3, 6).join(' | ') || 'no stack';
+      this.outputChannel.appendLine(`[TokenCount #${this.tokenCountCallCount}] len=${content.length} | ${stack}`);
+    }
+
+    try {
+      // Lazy load tiktoken encoder with caching
+      if (!this.tiktokenEncoder && !this.tiktokenLoadAttempted) {
+        this.tiktokenLoadAttempted = true;
+        const { getEncoding } = await import('js-tiktoken');
+        this.tiktokenEncoder = getEncoding('cl100k_base');
+      }
+
+      if (this.tiktokenEncoder) {
+        const tokens = this.tiktokenEncoder.encode(content);
+        const count = tokens.length;
+        if (this.debugLogsEnabled) {
+          this.outputChannel.appendLine(`  -> tiktoken: ${count} tokens`);
+        }
+        return count;
+      } else {
+        // Fallback if encoder failed to load
+        const count = Math.ceil(content.length / 4);
+        if (this.debugLogsEnabled) {
+          this.outputChannel.appendLine(`  -> fallback: ${count} tokens`);
+        }
+        return count;
+      }
+    } catch (error) {
+      // Fallback to character-based estimation
+      const count = Math.ceil(content.length / 4);
+      if (this.debugLogsEnabled) {
+        this.outputChannel.appendLine(`  -> fallback(error): ${count} tokens`);
+      }
+      return count;
+    }
   }
 
   /**
@@ -1360,6 +1777,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     this.defaultClient.updateConfig(this.gatewayConfig);
     // Clear client cache to force recreation with new config
     this.clients.clear();
+    // Update cached debug settings
+    this.updateDebugSettings();
     this.outputChannel.appendLine('Configuration reloaded');
   }
 }

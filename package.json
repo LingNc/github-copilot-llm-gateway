@@ -2,7 +2,7 @@
   "name": "github-copilot-llm-gateway",
   "displayName": "GitHub Copilot LLM Gateway",
   "description": "Connect GitHub Copilot to open-source models via vLLM or any OpenAI-compatible server",
-  "version": "1.1.0",
+  "version": "1.1.2",
   "publisher": "AndrewButson",
   "icon": "assets/copilot-llm-gateway.png",
   "private": true,
@@ -80,6 +80,30 @@
         "command": "github.copilot.llm-gateway.removeProvider",
         "title": "%command.removeProvider.title%",
         "category": "GitHub Copilot LLM Gateway"
+      },
+      {
+        "command": "github.copilot.llm-gateway.showTokenUsage",
+        "title": "%command.showTokenUsage.title%",
+        "category": "GitHub Copilot LLM Gateway",
+        "icon": "$(graph)"
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "type": "webview",
+          "id": "llmGateway.tokenUsage",
+          "name": "%view.tokenUsage.name%",
+          "when": "github.copilot.llm-gateway.tokenStatisticsEnabled",
+          "icon": "$(symbol-keyword)",
+          "contextualTitle": "%view.tokenUsage.contextualTitle%"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "llmGateway.tokenUsage",
+        "contents": "%view.tokenUsage.welcome%"
       }
     ],
     "configuration": {
@@ -136,9 +160,9 @@
         },
         "github.copilot.llm-gateway.agentTemperature": {
           "type": "number",
-          "default": 0.0,
-          "minimum": 0.0,
-          "maximum": 2.0,
+          "default": 0,
+          "minimum": 0,
+          "maximum": 2,
           "description": "%config.agentTemperature.description%",
           "markdownDescription": "%config.agentTemperature.markdownDescription%",
           "order": 8
@@ -182,6 +206,27 @@
           "description": "%config.configMode.description%",
           "markdownDescription": "%config.configMode.markdownDescription%",
           "order": 12
+        },
+        "github.copilot.llm-gateway.enableDebugLogs": {
+          "type": "boolean",
+          "default": false,
+          "description": "%config.enableDebugLogs.description%",
+          "markdownDescription": "%config.enableDebugLogs.markdownDescription%",
+          "order": 13
+        },
+        "github.copilot.llm-gateway.enableTokenStatistics": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.enableTokenStatistics.description%",
+          "markdownDescription": "%config.enableTokenStatistics.markdownDescription%",
+          "order": 14
+        },
+        "github.copilot.llm-gateway.enableCopilotUsageReport": {
+          "type": "boolean",
+          "default": false,
+          "description": "%config.enableCopilotUsageReport.description%",
+          "markdownDescription": "%config.enableCopilotUsageReport.markdownDescription%",
+          "order": 15
         }
       }
     }
@@ -195,5 +240,9 @@
     "esbuild": "^0.27.0",
     "eslint": "^9.39.1",
     "typescript": "^5.7.2"
-  }
+  },
+  "dependencies": {
+    "js-tiktoken": "^1.0.21"
+  },
+  "l10n": "./"
 }

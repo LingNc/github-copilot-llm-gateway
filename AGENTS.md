@@ -60,8 +60,146 @@ npm run package
 - [x] 中英双语支持
 - [x] Anthropic API 支持
 - [x] 模型 thinking 配置支持
-- [ ] Copilot 上下文 token 显示修复（需进一步研究）
+- [x] Copilot 上下文 token 显示修复（通过 progress.usage() 报告）
+- [x] Claude 3.7 Thinking 内容支持
+- [ ] 模型思考等级配置支持（Kimi/Qwen）
 - [ ] 完整测试和 bug 修复
+
+### 未来计划（暂不实装）
+
+#### Token 估算算法优化
+
+**目标**: 提供可配置的 Token 计算模式，平衡精确度和性能
+
+**背景**: 当前使用 `js-tiktoken` 进行精确的 Token 计算，但在大量文本处理时可能有性能开销。需要提供一个快速估算模式作为选项。
+
+**方案**:
+添加配置项 `tokenCalculationMode`，支持三种模式：
+
+1. **`precise`** (默认): 使用 `js-tiktoken` 精确计算
+   - 优点: 最准确
+   - 缺点: 可能有轻微性能开销
+
+2. **`fast-estimate`**: 使用字符数快速估算
+   - 中文: 1 Token ≈ 1.6 个汉字
+   - 英文: 1 Token ≈ 3.5 个字符
+   - 公式: `tokens = chineseChars / 1.6 + englishChars / 3.5`
+   - 优点: 速度最快，无依赖
+   - 缺点: 估算误差约 ±20%
+
+3. **`none`**: 不进行 Token 计算
+   - 仅使用消息数量估算
+   - 适用于完全不关心 Token 统计的用户
+
+**配置示例**:
+```json
+{
+  "github.copilot.llm-gateway.tokenCalculationMode": "fast-estimate"
+}
+```
+
+**实现位置**: `src/provider.ts` 中的 `countTokens()` 方法
+
+**预估工作量**: 2-3 小时
+
+**优先级**: 低（仅在用户反馈 tiktoken 性能问题时实施）
+
+#### 模型上下文长度显示异常问题排查
+
+**问题描述**: 在 Copilot Chat 模型选择界面中，LLM Gateway 配置的模型上下文长度显示比实际值偏大
+- 示例 1: 实际 1M (1,000,000) → 显示 1.1M
+- 示例 2: 实际 262K (262,144) → 显示 295K
+
+**可能原因**:
+1. **格式转换问题**: `formatNumber()` 函数在处理大数字时可能存在精度问题
+2. **单位换算问题**: K/M 换算逻辑可能有误（1000 vs 1024）
+3. **VS Code 内部处理**: Copilot Chat 可能对模型信息进行了额外的格式化
+4. **配置读取问题**: 模型配置读取时可能发生了数值转换错误
+
+**排查步骤**:
+1. 检查 `src/provider.ts` 中的 `formatNumber()` 方法实现
+2. 添加调试日志输出原始值和格式化后的值
+3. 对比 `provideLanguageModelChatInformation()` 返回的 `model.info` 数据
+4. 检查 `package.json` 中 `languageModelChatProviders` 的模型注册信息
+
+**相关代码位置**:
+- `src/provider.ts`: `formatNumber()` 方法
+- `src/provider.ts`: `provideLanguageModelChatInformation()`
+- `src/manager/ProviderManager.ts`: 模型注册逻辑
+
+**预估工作量**: 1-2 小时
+
+**优先级**: 中（影响用户体验，但不影响功能）
+
+#### 切换模型时自动隐藏 Token 状态栏
+
+**需求描述**: 当用户在 Copilot Chat 中切换到非 LLM Gateway 提供的模型时，自动隐藏当前显示的 Token 状态栏
+
+**背景**:
+- 目前 Token 状态栏只在当前会话中显示
+- 当用户切换到其他模型（如 GitHub Copilot 官方模型或其他扩展提供的模型）时，状态栏仍然显示，但数据已过期
+- 这会造成误导，显示的是之前模型的 Token 使用情况
+
+**实现思路**:
+1. 监听模型切换事件（如果有 VS Code API 支持）
+2. 或通过检测当前活动的 Chat Participant 来判断
+3. 当检测到切换到非当前 GatewayProvider 的模型时，调用 `tokenStatusBarItem.hide()`
+4. 当再次切换回 GatewayProvider 的模型时，恢复显示
+
+**相关 API 调研**:
+- `vscode.chat.onDidChangeActiveChatParticipant` (如果有)
+- `vscode.window.onDidChangeActiveTextEditor` (辅助判断)
+- 在 `provideLanguageModelResponse` 中记录当前 session 的 provider
+
+**相关代码位置**:
+- `src/provider.ts`: `updateTokenStatusBar()` 方法
+- `src/extension.ts`: 添加事件监听
+
+**预估工作量**: 2-3 小时
+
+**优先级**: 低（功能增强，非必要）
+
+#### Token 分类统计完善（Files 和 Tool Results）
+
+**当前状态**:
+已实现 3 个分类：
+- **System**: System Instructions, Tool Definitions
+- **User Context**: Messages
+
+**目标**: 实现与 Copilot Chat 官方一致的 5 个子项分类：
+- **System**: System Instructions, Tool Definitions
+- **User Context**: Messages, **Files**, **Tool Results**
+
+**技术难点**:
+1. **Files 分类**: 需要从消息内容中识别文件附件相关的 Token
+   - 需要解析消息中的文件引用（如 `#file:path/to/file`）
+   - 或者从 VS Code API 获取附件信息
+
+2. **Tool Results 分类**: 需要从消息内容中识别工具返回结果
+   - 需要解析 `LanguageModelToolResultPart` 的内容
+   - 区分普通消息和工具返回结果
+
+**实现思路**:
+1. 在 `convertMessages()` 方法中记录文件和工具结果的相关信息
+2. 修改 `provideLanguageModelResponse` 传递额外的分类数据
+3. 在 `updateTokenStatusBar` 中显示完整的 5 个分类
+
+**参考实现**:
+Copilot Chat 使用 prompt-tsx 的 XML 标签来区分不同类型的内容：
+```typescript
+// Copilot Chat 源码中的分类映射
+attachment: { category: PromptTokenCategory.UserContext, label: PromptTokenLabel.Files },
+file: { category: PromptTokenCategory.UserContext, label: PromptTokenLabel.Files },
+error: { category: PromptTokenCategory.UserContext, label: PromptTokenLabel.ToolResults },
+```
+
+**相关代码位置**:
+- `src/provider.ts`: `convertMessages()` 方法
+- `src/provider.ts`: Token 统计逻辑
+
+**预估工作量**: 3-4 小时
+
+**优先级**: 低（当前 Messages 合计已能满足大部分需求）
 
 ### 最新进度
 项目已重构为支持多厂商配置系统：
@@ -72,6 +210,8 @@ npm run package
 - 中英双语界面支持
 - 向后兼容旧配置
 - **新增**: Anthropic API 格式支持（apiFormat: 'anthropic'）
+- **新增**: Token 使用量显示修复（通过 progress.usage() 报告给 VS Code）
+- **新增**: Claude 3.7 Thinking 内容支持（处理 thinking 类型 content block）
 
 ### 文件清单
 | 文件 | 说明 |
@@ -202,6 +342,21 @@ OpenAI/Anthropic Compatible Server (vLLM/Ollama/Anthropic/etc)
 3. 当添加新的技术规范时，必须补充。
 4. 当功能有较大变更时，必须同步更新 README.md。
 5. 每次完成一项功能需要提交git，风格仿照曾经的提交记录的模式。
+
+### Git 提交规范
+- **格式**: `🛠️ 文件路径 -> 简短描述`
+- **前缀**: 使用锤子表情符号 `🛠️` 开头
+- **文件路径**: 列出主要修改的文件（用逗号分隔），放在 `->` 前面
+- **描述**: 简短描述修改内容，放在 `->` 后面
+- **语言**: 中文或英文均可，保持简洁
+- **不要包含**: Co-Authored-By、Signed-off-by 等信息
+
+**示例**:
+```
+🛠️ src/client.ts,src/provider.ts -> 实现 Token 使用量显示功能
+🛠️ AGENTS.md -> 添加 Git 提交规范
+🛠️ src/provider.ts -> 修复栈溢出问题
+```
 
 ### 维护责任
 - 每次会话开始前，AI 工具应优先读取 AGENTS.md 了解项目状态。

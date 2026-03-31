@@ -203,8 +203,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     const filled = Math.round((percentage / 100) * 20);
     const empty = 20 - filled;
-    const bar = '█'.repeat(filled) + '▒'.repeat(empty);
-    tooltip.appendMarkdown(`${bar}\n\n`);
+    const barFilled = '<span style="color:var(--vscode-foreground)">█</span>'.repeat(filled);
+    const barEmpty = '<span style="color:var(--vscode-descriptionForeground)">▒</span>'.repeat(empty);
+    tooltip.appendMarkdown(`${barFilled}${barEmpty}\n\n`);
 
     const remaining = maxTokens - usedTokens;
     tooltip.appendMarkdown(`${this.formatNumber(remaining)} ${this.getLocalizedString('token.remainingForResponse')}\n\n`);

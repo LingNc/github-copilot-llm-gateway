@@ -1320,7 +1320,23 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           });
         }
 
-        // Report token usage if the API supports it
+        // Report token usage via DataPart (experimental)
+        // This attempts to send token usage through a special MIME type that Copilot Chat might recognize
+        try {
+          const usageData = new TextEncoder().encode(JSON.stringify({
+            promptTokens,
+            completionTokens,
+            totalTokens: promptTokens + completionTokens,
+            outputBuffer: safeMaxOutputTokens,
+            timestamp: Date.now(),
+          }));
+          progress.report(new vscode.LanguageModelDataPart(usageData, 'application/vnd.github.copilot-llm-gateway.usage+json'));
+          this.outputChannel.appendLine(`Token usage reported via DataPart: prompt=${promptTokens}, completion=${completionTokens}`);
+        } catch (e) {
+          this.outputChannel.appendLine(`Token usage DataPart failed: ${e}`);
+        }
+
+        // Report token usage if the API supports it (fallback)
         // Note: progress.usage is part of the proposed API and may not be available in all VS Code versions
         if (typeof (progress as any).usage === 'function') {
           (progress as any).usage({
@@ -1329,7 +1345,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
             outputBuffer: safeMaxOutputTokens,
             promptTokenDetails,
           });
-          this.outputChannel.appendLine(`Token usage reported: prompt=${promptTokens}, completion=${completionTokens}, outputBuffer=${safeMaxOutputTokens}`);
+          this.outputChannel.appendLine(`Token usage reported via usage(): prompt=${promptTokens}, completion=${completionTokens}, outputBuffer=${safeMaxOutputTokens}`);
         } else {
           this.outputChannel.appendLine(`Token usage (API not supported): prompt=${promptTokens}, completion=${completionTokens}`);
         }
@@ -1366,15 +1382,26 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     if (typeof text === 'string') {
       content = text;
     } else {
-      // Filter and extract only text parts from the message content
-      content = text.content
-        .filter((part): part is vscode.LanguageModelTextPart => part instanceof vscode.LanguageModelTextPart)
-        .map((part) => part.value)
-        .join('');
+      // Extract content from all part types, not just text parts
+      const parts: string[] = [];
+      for (const part of text.content) {
+        if (part instanceof vscode.LanguageModelTextPart) {
+          parts.push(part.value);
+        } else if (part instanceof vscode.LanguageModelToolResultPart) {
+          // Include tool result content
+          parts.push(`Tool result: ${part.callId}`);
+        } else if (part instanceof vscode.LanguageModelToolCallPart) {
+          // Include tool call content
+          parts.push(`Tool call: ${part.name}`);
+        } else if (part instanceof vscode.LanguageModelDataPart) {
+          // Include data part (usually binary data like images)
+          parts.push(`[Data: ${part.mimeType}, ${part.data.length} bytes]`);
+        }
+      }
+      content = parts.join('\n');
     }
 
     // Log call details with stack trace to debug frequent calls
-    const now = Date.now();
     const stack = new Error().stack?.split('\n').slice(3, 6).join(' | ') || 'no stack';
     this.outputChannel.appendLine(`[TokenCount #${this.tokenCountCallCount}] len=${content.length} | ${stack}`);
 

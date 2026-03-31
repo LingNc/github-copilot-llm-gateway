@@ -39,7 +39,7 @@ export class TokenUsageViewProvider implements vscode.WebviewViewProvider {
     // Handle messages from the webview
     webviewView.webview.onDidReceiveMessage(async (data) => {
       switch (data.type) {
-        case 'compress':
+        case 'compact':
           await vscode.commands.executeCommand('workbench.action.chat.clear');
           vscode.window.showInformationMessage(
             vscode.l10n.t('token.contextCompressed')
@@ -166,7 +166,7 @@ export class TokenUsageViewProvider implements vscode.WebviewViewProvider {
       '            font-size: 12px;',
       '            color: var(--vscode-descriptionForeground);',
       '        }',
-      '        .compress-button {',
+      '        .compact-button {',
       '            margin-top: 24px;',
       '            padding: 8px 16px;',
       '            background: var(--vscode-button-background);',
@@ -181,7 +181,7 @@ export class TokenUsageViewProvider implements vscode.WebviewViewProvider {
       '            justify-content: center;',
       '            gap: 6px;',
       '        }',
-      '        .compress-button:hover {',
+      '        .compact-button:hover {',
       '            background: var(--vscode-button-hoverBackground);',
       '        }',
       '        .empty-state {',
@@ -247,12 +247,12 @@ export class TokenUsageViewProvider implements vscode.WebviewViewProvider {
       '            html += \'<div class="remaining">\' + formatTokens(data.remaining) + \' remaining for response</div>\';',
       '            html += \'</div>\';',
       '            html += detailsHtml;',
-      '            html += \'<button class="compress-button" onclick="compressContext()">Compress Context</button>\';',
+      '            html += \'<button class="compact-button" onclick="compactContext()">Compact Context</button>\';',
       '',
       '            content.innerHTML = html;',
       '        }',
       '',
-      '        function compressContext() {',
+      '        function compactContext() {',
       '            vscode.postMessage({ type: \'compress\' });',
       '        }',
       '',

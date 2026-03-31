@@ -195,41 +195,39 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       }
     }
 
-    // Header - 上下文窗口
-    tooltip.appendMarkdown(`## ${this.getLocalizedString('token.contextWindow')}\n\n`);
+    tooltip.appendMarkdown(`### ${this.getLocalizedString('token.contextWindow')}\n\n`);
 
-    // Token count with percentage on same line
     const tokenText = `${this.formatNumber(usedTokens)}/${this.formatNumber(maxTokens)} ${this.getLocalizedString('token.tokens')}`;
-    tooltip.appendMarkdown(`${tokenText.padEnd(25)} **${percentage}%**\n\n`);
+    const percentageText = `${percentage}%`;
+    tooltip.appendMarkdown(`\`${tokenText.padEnd(30)} ${percentageText.padStart(4)}\`\n\n`);
 
-    // Progress bar using emoji blocks
-    const filled = Math.round(percentage / 10);
-    const bar = '🟦'.repeat(filled) + '⬜'.repeat(10 - filled);
-    tooltip.appendMarkdown(`${bar}\n\n`);
+    const filled = Math.round((percentage / 100) * 20);
+    const empty = 20 - filled;
+    const bar = '█'.repeat(filled) + '░'.repeat(empty);
+    tooltip.appendMarkdown(`\`${bar}\`\n\n`);
 
-    // Remaining for response
-    tooltip.appendMarkdown(`${this.getLocalizedString('token.remainingForResponse')}\n\n`);
+    const remaining = maxTokens - usedTokens;
+    tooltip.appendMarkdown(`*${this.formatNumber(remaining)} ${this.getLocalizedString('token.remainingForResponse')}*\n\n`);
     tooltip.appendMarkdown(`---\n\n`);
 
-    // System section
     if (systemItems.length > 0) {
-      tooltip.appendMarkdown(`**${this.getLocalizedString('token.system')}**\n\n`);
+      tooltip.appendMarkdown(`**${this.getLocalizedString('token.system').toUpperCase()}**\n\n`);
       for (const item of systemItems) {
-        tooltip.appendMarkdown(`${item.label.padEnd(30)} ${item.percentage}%\n`);
+        const label = item.label.length > 26 ? item.label.substring(0, 23) + '...' : item.label;
+        tooltip.appendMarkdown(`| ${label.padEnd(25)} | ${item.percentage.toString().padStart(3)}% |\n`);
       }
       tooltip.appendMarkdown(`\n`);
     }
 
-    // User Context section
     if (userContextItems.length > 0) {
-      tooltip.appendMarkdown(`**${this.getLocalizedString('token.userContext')}**\n\n`);
+      tooltip.appendMarkdown(`**${this.getLocalizedString('token.userContext').toUpperCase()}**\n\n`);
       for (const item of userContextItems) {
-        tooltip.appendMarkdown(`${item.label.padEnd(30)} ${item.percentage}%\n`);
+        const label = item.label.length > 25 ? item.label.substring(0, 22) + '...' : item.label;
+        tooltip.appendMarkdown(`| ${label.padEnd(25)} | ${item.percentage.toString().padStart(3)}% |\n`);
       }
       tooltip.appendMarkdown(`\n`);
     }
 
-    // Separator and compress button
     tooltip.appendMarkdown(`---\n\n`);
     tooltip.appendMarkdown(`[${this.getLocalizedString('token.compressContext')}](command:github.copilot.llm-gateway.compressContext)\n`);
 

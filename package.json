@@ -216,7 +216,7 @@
         },
         "github.copilot.llm-gateway.enableTokenStatistics": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "description": "%config.enableTokenStatistics.description%",
           "markdownDescription": "%config.enableTokenStatistics.markdownDescription%",
           "order": 14

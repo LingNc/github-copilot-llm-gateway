@@ -214,7 +214,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       tooltip.appendMarkdown(`**${this.getLocalizedString('token.system').toUpperCase()}**\n\n`);
       for (const item of systemItems) {
         const label = item.label.length > 26 ? item.label.substring(0, 23) + '...' : item.label;
-        tooltip.appendMarkdown(`${label.padEnd(25)} ${item.percentage.toString().padStart(3)}%\n`);
+        const usedPercentage = usedTokens > 0 ? Math.round((item.percentage / 100) * (usedTokens / maxTokens) * 100) : 0;
+        tooltip.appendMarkdown(`${label.padEnd(25)} ${usedPercentage.toString().padStart(3)}%\n`);
       }
       tooltip.appendMarkdown(`\n`);
     }
@@ -223,7 +224,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       tooltip.appendMarkdown(`**${this.getLocalizedString('token.userContext').toUpperCase()}**\n\n`);
       for (const item of userContextItems) {
         const label = item.label.length > 25 ? item.label.substring(0, 22) + '...' : item.label;
-        tooltip.appendMarkdown(`${label.padEnd(25)} ${item.percentage.toString().padStart(3)}%\n`);
+        const usedPercentage = usedTokens > 0 ? Math.round((item.percentage / 100) * (usedTokens / maxTokens) * 100) : 0;
+        tooltip.appendMarkdown(`${label.padEnd(25)} ${usedPercentage.toString().padStart(3)}%\n`);
       }
       tooltip.appendMarkdown(`\n`);
     }

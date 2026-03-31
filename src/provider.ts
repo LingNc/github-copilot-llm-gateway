@@ -126,8 +126,56 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     const color = percentage > 90 ? '#ff6b6b' : percentage > 70 ? '#ffd93d' : '#6bcf7f';
 
     this.tokenStatusBarItem.text = `$(symbol-keyword) ${percentage}%`;
-    this.tokenStatusBarItem.tooltip = `Token Usage: ${usedTokens.toLocaleString()} / ${maxTokens.toLocaleString()} (${percentage}%)\nClick for details & compress`;
     this.tokenStatusBarItem.color = color;
+
+    // Build detailed tooltip with markdown
+    const tooltip = new vscode.MarkdownString();
+    tooltip.supportHtml = true;
+    tooltip.isTrusted = true;
+
+    // Header
+    tooltip.appendMarkdown(`**${vscode.l10n.t('token.contextWindow')}**\n\n`);
+    tooltip.appendMarkdown(`${vscode.l10n.t('token.used')}: ${usedTokens.toLocaleString()} / ${maxTokens.toLocaleString()} ${vscode.l10n.t('token.tokens')} (${percentage}%)\n\n`);
+
+    // Progress bar using unicode characters
+    const filled = Math.round(percentage / 5);
+    const empty = 20 - filled;
+    const bar = '█'.repeat(filled) + '░'.repeat(empty);
+    const barColor = percentage > 90 ? '🔴' : percentage > 70 ? '🟡' : '🟢';
+    tooltip.appendMarkdown(`${barColor} ${bar} ${percentage}%\n\n`);
+
+    // Category breakdown
+    if (details && details.length > 0) {
+      tooltip.appendMarkdown(`---\n\n`);
+      tooltip.appendMarkdown(`**${vscode.l10n.t('token.details')}**\n\n`);
+
+      // Group by category
+      const byCategory = new Map<string, Array<{ label: string; percentage: number }>>();
+      for (const detail of details) {
+        if (!byCategory.has(detail.category)) {
+          byCategory.set(detail.category, []);
+        }
+        byCategory.get(detail.category)!.push(detail);
+      }
+
+      for (const [category, items] of byCategory) {
+        tooltip.appendMarkdown(`**${category}**\n`);
+        for (const item of items) {
+          tooltip.appendMarkdown(`  • ${item.label}: ${item.percentage}%\n`);
+        }
+        tooltip.appendMarkdown(`\n`);
+      }
+    }
+
+    // Remaining tokens
+    const remaining = maxTokens - usedTokens;
+    tooltip.appendMarkdown(`---\n\n`);
+    tooltip.appendMarkdown(`${vscode.l10n.t('token.remainingForResponse')}: ${remaining.toLocaleString()} ${vscode.l10n.t('token.tokens')}\n\n`);
+
+    // Action hint
+    tooltip.appendMarkdown(`*${vscode.l10n.t('token.clickToCompress')}*`);
+
+    this.tokenStatusBarItem.tooltip = tooltip;
     this.tokenStatusBarItem.show();
 
     // Update token details if provided
@@ -136,11 +184,6 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         ...d,
         tokens: Math.round((d.percentage / 100) * usedTokens)
       }));
-    }
-
-    // Update the view provider
-    if (this.tokenUsageProvider) {
-      this.tokenUsageProvider.updateData(usedTokens, maxTokens, this.tokenDetails);
     }
 
     this.outputChannel.appendLine(`[Token Statistics] ${usedTokens}/${maxTokens} (${percentage}%)`);
@@ -152,18 +195,11 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   private tokenDetails: Array<{ category: string; label: string; tokens: number; percentage: number }> = [];
 
   /**
-   * Show token usage details in sidebar view
+   * Compress context - directly trigger compression without showing view
    */
   public async compressContext(): Promise<void> {
-    // Show the token usage view
-    if (this.tokenUsageProvider) {
-      this.tokenUsageProvider.show();
-    } else {
-      vscode.commands.executeCommand('llmGateway.tokenUsage.focus');
-    }
-
     if (this.currentContextTokens === 0) {
-      // No active session, just show empty view
+      vscode.window.showInformationMessage(vscode.l10n.t('token.noActiveSession'));
       return;
     }
 
@@ -186,11 +222,6 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       this.currentSessionCompletionTokens = 0;
       this.tokenDetails = [];
       this.updateTokenStatusBar(0, this.currentModelMaxTokens, []);
-
-      // Update the view
-      if (this.tokenUsageProvider) {
-        this.tokenUsageProvider.updateData(0, this.currentModelMaxTokens, []);
-      }
     }
   }
 

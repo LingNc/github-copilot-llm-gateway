@@ -141,56 +141,87 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     this.tokenStatusBarItem.text = `$(symbol-keyword) ${percentage}%`;
     this.tokenStatusBarItem.color = color;
 
-    // Build detailed tooltip with markdown
+    // Build detailed tooltip with HTML for better styling
     const tooltip = new vscode.MarkdownString();
     tooltip.supportHtml = true;
     tooltip.isTrusted = true;
 
-    // Header - 上下文窗口
-    tooltip.appendMarkdown(`**${vscode.l10n.t('token.contextWindow')}**\n\n`);
+    // Group details by category
+    const systemItems: Array<{ label: string; percentage: number }> = [];
+    const userContextItems: Array<{ label: string; percentage: number }> = [];
 
-    // Token count with K format: 56.2K/160K 个令牌
-    tooltip.appendMarkdown(`${this.formatNumber(usedTokens)}/${this.formatNumber(maxTokens)} ${vscode.l10n.t('token.tokens')}\n\n`);
-
-    // Percentage
-    tooltip.appendMarkdown(`**${percentage}%**\n\n`);
-
-    // Progress bar using unicode characters
-    const filled = Math.round(percentage / 5);
-    const empty = 20 - filled;
-    const bar = '█'.repeat(filled) + '░'.repeat(empty);
-    const barColor = percentage > 90 ? '🔴' : percentage > 70 ? '🟡' : '🟢';
-    tooltip.appendMarkdown(`${barColor} ${bar}\n\n`);
-
-    // Remaining tokens
-    const remaining = maxTokens - usedTokens;
-    tooltip.appendMarkdown(`${vscode.l10n.t('token.remainingForResponse')}\n\n`);
-
-    // Category breakdown
     if (details && details.length > 0) {
-      tooltip.appendMarkdown(`---\n\n`);
-
-      // Group by category
-      const byCategory = new Map<string, Array<{ label: string; percentage: number }>>();
       for (const detail of details) {
-        if (!byCategory.has(detail.category)) {
-          byCategory.set(detail.category, []);
-        }
-        byCategory.get(detail.category)!.push(detail);
-      }
-
-      for (const [category, items] of byCategory) {
-        tooltip.appendMarkdown(`**${category}**\n\n`);
-        for (const item of items) {
-          tooltip.appendMarkdown(`${item.label}\n`);
-          tooltip.appendMarkdown(`${item.percentage}%\n\n`);
+        if (detail.category === vscode.l10n.t('token.system')) {
+          systemItems.push(detail);
+        } else if (detail.category === vscode.l10n.t('token.userContext')) {
+          userContextItems.push(detail);
         }
       }
     }
 
-    // Compress button using command link
-    tooltip.appendMarkdown(`---\n\n`);
-    tooltip.appendMarkdown(`[${vscode.l10n.t('token.compressContext')}](command:github.copilot.llm-gateway.compressContext "${vscode.l10n.t('token.compressDescription')}")`);
+    // HTML styled tooltip
+    const barColor = percentage > 90 ? '#f44336' : percentage > 70 ? '#ff9800' : '#4caf50';
+    const filled = Math.round(percentage / 5);
+    const empty = 20 - filled;
+
+    let html = `<div style="font-family: var(--vscode-font-family); min-width: 280px;">`;
+
+    // Header with large title
+    html += `<div style="font-size: 14px; font-weight: 600; margin-bottom: 12px; color: var(--vscode-foreground);">${vscode.l10n.t('token.contextWindow')}</div>`;
+
+    // Token count row
+    html += `<div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px;">`;
+    html += `<span style="font-size: 18px; font-weight: 500; color: var(--vscode-foreground);">${this.formatNumber(usedTokens)}/${this.formatNumber(maxTokens)}</span>`;
+    html += `<span style="font-size: 13px; color: var(--vscode-descriptionForeground);">${vscode.l10n.t('token.tokens')}</span>`;
+    html += `</div>`;
+
+    // Percentage
+    html += `<div style="font-size: 24px; font-weight: 300; margin: 8px 0; color: ${barColor};">${percentage}%</div>`;
+
+    // Progress bar
+    html += `<div style="background: var(--vscode-progressBar-background); height: 4px; border-radius: 2px; margin: 8px 0; overflow: hidden;">`;
+    html += `<div style="background: ${barColor}; height: 100%; width: ${percentage}%;"></div>`;
+    html += `</div>`;
+
+    // Remaining
+    const remaining = maxTokens - usedTokens;
+    html += `<div style="font-size: 12px; color: var(--vscode-descriptionForeground); margin-bottom: 16px;">${vscode.l10n.t('token.remainingForResponse')}</div>`;
+
+    // System section
+    if (systemItems.length > 0) {
+      html += `<div style="margin-bottom: 12px;">`;
+      html += `<div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--vscode-descriptionForeground); letter-spacing: 0.5px; margin-bottom: 8px;">${vscode.l10n.t('token.system')}</div>`;
+      for (const item of systemItems) {
+        html += `<div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 0; font-size: 12px;">`;
+        html += `<span style="color: var(--vscode-foreground);">${item.label}</span>`;
+        html += `<span style="color: var(--vscode-descriptionForeground);">${item.percentage}%</span>`;
+        html += `</div>`;
+      }
+      html += `</div>`;
+    }
+
+    // User Context section
+    if (userContextItems.length > 0) {
+      html += `<div style="margin-bottom: 16px;">`;
+      html += `<div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--vscode-descriptionForeground); letter-spacing: 0.5px; margin-bottom: 8px;">${vscode.l10n.t('token.userContext')}</div>`;
+      for (const item of userContextItems) {
+        html += `<div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 0; font-size: 12px;">`;
+        html += `<span style="color: var(--vscode-foreground);">${item.label}</span>`;
+        html += `<span style="color: var(--vscode-descriptionForeground);">${item.percentage}%</span>`;
+        html += `</div>`;
+      }
+      html += `</div>`;
+    }
+
+    // Compress button styled like VS Code button
+    html += `<div style="margin-top: 12px;">`;
+    html += `<a href="command:github.copilot.llm-gateway.compressContext" style="display: inline-block; padding: 6px 16px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); text-decoration: none; border-radius: 2px; font-size: 12px; text-align: center; cursor: pointer;">${vscode.l10n.t('token.compressContext')}</a>`;
+    html += `</div>`;
+
+    html += `</div>`;
+
+    tooltip.appendMarkdown(html);
 
     this.tokenStatusBarItem.tooltip = tooltip;
     this.tokenStatusBarItem.show();

@@ -209,7 +209,7 @@ export class TokenUsageViewProvider implements vscode.WebviewViewProvider {
 </head>
 <body>
     <div id="content">
-        <div class="empty-state">No active chat session</div>
+        <div class='empty-state'>No active chat session</div>
     </div>
 
     <script>
@@ -228,7 +228,7 @@ export class TokenUsageViewProvider implements vscode.WebviewViewProvider {
             const content = document.getElementById('content');
 
             if (data.usedTokens === 0) {
-                content.innerHTML = '<div class="empty-state">No active chat session</div>';
+                content.innerHTML = '<div class='empty-state'>No active chat session</div>';
                 return;
             }
 
@@ -246,13 +246,13 @@ export class TokenUsageViewProvider implements vscode.WebviewViewProvider {
                 }
 
                 for (const [category, items] of Object.entries(byCategory)) {
-                    detailsHtml += `<div class="category">`;
-                    detailsHtml += `<div class="category-title">${escapeHtml(category)}</div>`;
+                    detailsHtml += `<div class='category'>`;
+                    detailsHtml += `<div class='category-title'>${escapeHtml(category)}</div>`;
                     for (const item of items) {
                         detailsHtml += `
-                            <div class="detail-item">
-                                <span class="detail-label">${escapeHtml(item.label)}</span>
-                                <span class="detail-percentage">${item.percentage}%</span>
+                            <div class='detail-item'>
+                                <span class='detail-label'>${escapeHtml(item.label)}</span>
+                                <span class='detail-percentage'>${item.percentage}%</span>
                             </div>
                         `;
                     }
@@ -261,14 +261,14 @@ export class TokenUsageViewProvider implements vscode.WebviewViewProvider {
             }
 
             content.innerHTML = `
-                <div class="header">
-                    <div class="title">Context Window</div>
-                    <div class="token-count">${formatTokens(data.usedTokens)}/${formatTokens(data.maxTokens)} tokens</div>
-                    <div class="percentage ${percentageClass}">${data.percentage}%</div>
-                    <div class="remaining">${formatTokens(data.remaining)} remaining for response</div>
+                <div class='header'>
+                    <div class='title'>Context Window</div>
+                    <div class='token-count'>${formatTokens(data.usedTokens)}/${formatTokens(data.maxTokens)} tokens</div>
+                    <div class='percentage ${percentageClass}'>${data.percentage}%</div>
+                    <div class='remaining'>${formatTokens(data.remaining)} remaining for response</div>
                 </div>
                 ${detailsHtml}
-                <button class="compress-button" onclick="compressContext()">
+                <button class='compress-button' onclick='compressContext()'>
                     <span>Compress Context</span>
                 </button>
             `;

@@ -236,5 +236,6 @@
   },
   "dependencies": {
     "js-tiktoken": "^1.0.21"
-  }
+  },
+  "l10n": "./"
 }

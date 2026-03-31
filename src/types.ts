@@ -154,12 +154,18 @@ export interface ModelConfig {
 }
 
 /**
- * Provider configuration
+ * API format type
+ */
+export type ApiFormat = 'openai' | 'anthropic';
+
+/**
+ * Provider configuration with API format
  */
 export interface ProviderConfig {
   name: string;
   baseURL: string;
   apiKey?: string;
+  apiFormat?: ApiFormat;
   models: Record<string, ModelConfig>;
 }
 
@@ -180,3 +186,77 @@ export interface MultiProviderConfig {
 export interface ExtendedGatewayConfig extends GatewayConfig, MultiProviderConfig {
   // This combines both old and new config formats
 }
+
+// ============================================
+// Anthropic API Types
+// ============================================
+
+/**
+ * Anthropic message content block
+ */
+export type AnthropicContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
+  | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
+  | { type: 'tool_result'; tool_use_id: string; content: string }
+  | { type: 'thinking'; thinking: string; signature?: string };
+
+/**
+ * Anthropic message
+ */
+export interface AnthropicMessage {
+  role: 'user' | 'assistant';
+  content: string | AnthropicContentBlock[];
+}
+
+/**
+ * Anthropic tool definition
+ */
+export interface AnthropicTool {
+  name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+}
+
+/**
+ * Anthropic message request
+ */
+export interface AnthropicMessageRequest {
+  model: string;
+  max_tokens: number;
+  messages: AnthropicMessage[];
+  system?: string;
+  temperature?: number;
+  top_p?: number;
+  stream?: boolean;
+  tools?: AnthropicTool[];
+  tool_choice?: { type: 'auto' | 'any' | 'tool'; name?: string };
+}
+
+/**
+ * Anthropic message response
+ */
+export interface AnthropicMessageResponse {
+  id: string;
+  type: 'message';
+  role: 'assistant';
+  content: AnthropicContentBlock[];
+  model: string;
+  stop_reason: 'end_turn' | 'max_tokens' | 'stop_sequence' | 'tool_use' | null;
+  stop_sequence: string | null;
+  usage: {
+    input_tokens: number;
+    output_tokens: number;
+  };
+}
+
+/**
+ * Anthropic streaming event types
+ */
+export type AnthropicStreamEvent =
+  | { type: 'message_start'; message: { id: string; type: 'message'; role: 'assistant'; content: []; model: string; stop_reason: null; stop_sequence: null; usage: { input_tokens: number; output_tokens: number } } }
+  | { type: 'content_block_start'; index: number; content_block: AnthropicContentBlock }
+  | { type: 'content_block_delta'; index: number; delta: { type: 'text_delta'; text: string } | { type: 'input_json_delta'; partial_json: string } | { type: 'thinking_delta'; thinking: string } }
+  | { type: 'content_block_stop'; index: number }
+  | { type: 'message_delta'; usage?: { output_tokens: number }; stop_reason?: AnthropicMessageResponse['stop_reason']; stop_sequence?: string | null }
+  | { type: 'message_stop' };

@@ -27,6 +27,8 @@
   "config.enableDebugLogs.markdownDescription": "When enabled, outputs detailed token counting logs to the LLM Gateway output channel. Default: false",
   "config.enableTokenStatistics.description": "Enable token usage statistics and status bar display",
   "config.enableTokenStatistics.markdownDescription": "When enabled, displays current session token usage percentage in the status bar and allows manual context compression. Default: false",
+  "config.enableCopilotUsageReport.description": "Report token usage to Copilot Chat context window (experimental)",
+  "config.enableCopilotUsageReport.markdownDescription": "When enabled, reports token usage to Copilot Chat's native context window display. This is an experimental feature and may not work with all VS Code versions. Default: false",
   "command.testConnection.title": "Test Server Connection",
   "command.openConfig.title": "Open Configuration",
   "command.reloadConfig.title": "Reload Configuration",

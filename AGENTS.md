@@ -65,6 +65,45 @@ npm run package
 - [ ] 模型思考等级配置支持（Kimi/Qwen）
 - [ ] 完整测试和 bug 修复
 
+### 未来计划（暂不实装）
+
+#### Token 估算算法优化
+
+**目标**: 提供可配置的 Token 计算模式，平衡精确度和性能
+
+**背景**: 当前使用 `js-tiktoken` 进行精确的 Token 计算，但在大量文本处理时可能有性能开销。需要提供一个快速估算模式作为选项。
+
+**方案**:
+添加配置项 `tokenCalculationMode`，支持三种模式：
+
+1. **`precise`** (默认): 使用 `js-tiktoken` 精确计算
+   - 优点: 最准确
+   - 缺点: 可能有轻微性能开销
+
+2. **`fast-estimate`**: 使用字符数快速估算
+   - 中文: 1 Token ≈ 1.6 个汉字
+   - 英文: 1 Token ≈ 3.5 个字符
+   - 公式: `tokens = chineseChars / 1.6 + englishChars / 3.5`
+   - 优点: 速度最快，无依赖
+   - 缺点: 估算误差约 ±20%
+
+3. **`none`**: 不进行 Token 计算
+   - 仅使用消息数量估算
+   - 适用于完全不关心 Token 统计的用户
+
+**配置示例**:
+```json
+{
+  "github.copilot.llm-gateway.tokenCalculationMode": "fast-estimate"
+}
+```
+
+**实现位置**: `src/provider.ts` 中的 `countTokens()` 方法
+
+**预估工作量**: 2-3 小时
+
+**优先级**: 低（仅在用户反馈 tiktoken 性能问题时实施）
+
 ### 最新进度
 项目已重构为支持多厂商配置系统：
 - 支持配置多个不同 baseURL 的厂商

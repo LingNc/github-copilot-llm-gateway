@@ -228,7 +228,12 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     if (userContextItems.length > 0) {
       tooltip.appendMarkdown(`**${this.getLocalizedString('token.userContext').toUpperCase()}**\n\n`);
-      for (const item of userContextItems) {
+      // Sort items to ensure consistent order: Messages, Files, Tool Results
+      const sortedItems = userContextItems.sort((a, b) => {
+        const order = ['Messages', 'Files', 'Tool Results'];
+        return order.indexOf(a.label) - order.indexOf(b.label);
+      });
+      for (const item of sortedItems) {
         const label = item.label.length > 25 ? item.label.substring(0, 22) + '...' : item.label;
         const usedPercentage = usedTokens > 0 ? Math.round((item.percentage / 100) * (usedTokens / maxTokens) * 100) : 0;
         tooltip.appendMarkdown(`${label.padEnd(25)} ${usedPercentage.toString().padStart(3)}%\n`);
@@ -340,11 +345,24 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   }
 
   /**
-   * Convert messages to OpenAI format
+   * Convert messages to OpenAI format and categorize tokens
    * Supports text, images, tools, and tool results
+   * Returns both the converted messages and token breakdown by category
    */
-  private convertMessages(messages: readonly vscode.LanguageModelChatMessage[]): Record<string, unknown>[] {
+  private convertMessagesWithCategories(
+    messages: readonly vscode.LanguageModelChatMessage[]
+  ): {
+    messages: Record<string, unknown>[];
+    categoryTokens: {
+      messagesTokens: number;
+      filesTokens: number;
+      toolResultsTokens: number;
+    };
+  } {
     const openAIMessages: Record<string, unknown>[] = [];
+    let messagesTokens = 0;
+    let filesTokens = 0;
+    let toolResultsTokens = 0;
 
     for (const msg of messages) {
       const role = this.mapRole(msg.role);
@@ -355,20 +373,29 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       for (const part of msg.content) {
         if (part instanceof vscode.LanguageModelTextPart) {
           contentParts.push({ type: 'text', text: part.value });
+          // Count as messages (this includes regular text and file references)
+          messagesTokens += this.estimateTokenCount(part.value);
         } else if (part instanceof vscode.LanguageModelDataPart) {
-          // Handle image data
+          // Handle image data - count as files
           if (part.mimeType.startsWith('image/')) {
             const base64Data = Buffer.from(part.data).toString('base64');
             const imageUrl = `data:${part.mimeType};base64,${base64Data}`;
             contentParts.push({ type: 'image_url', image_url: { url: imageUrl } });
             this.outputChannel.appendLine(`  Added image: ${part.mimeType}, ${part.data.length} bytes`);
+            // Count image data as files
+            filesTokens += this.estimateTokenCount(base64Data);
           } else {
             // Handle other binary data as text
             const text = Buffer.from(part.data).toString('utf-8');
             contentParts.push({ type: 'text', text });
+            messagesTokens += this.estimateTokenCount(text);
           }
         } else if (part instanceof vscode.LanguageModelToolResultPart) {
-          toolResults.push(this.convertToolResultPart(part));
+          const toolResult = this.convertToolResultPart(part);
+          toolResults.push(toolResult);
+          // Count tool result content
+          const toolResultText = typeof toolResult.content === 'string' ? toolResult.content : this.safeStringify(toolResult.content);
+          toolResultsTokens += this.estimateTokenCount(toolResultText);
         } else if (part instanceof vscode.LanguageModelToolCallPart) {
           toolCalls.push(this.convertToolCallPart(part));
         }
@@ -394,7 +421,22 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       }
     }
 
-    return openAIMessages;
+    return {
+      messages: openAIMessages,
+      categoryTokens: {
+        messagesTokens,
+        filesTokens,
+        toolResultsTokens,
+      },
+    };
+  }
+
+  /**
+   * Estimate token count for a string (approximation)
+   * This is a fast estimation: ~4 characters per token
+   */
+  private estimateTokenCount(text: string): number {
+    return Math.ceil(text.length / 4);
   }
 
   /**
@@ -1345,12 +1387,11 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     // Get the client for this provider
     const client = this.getClient(providerId);
 
-    // Convert messages
-    const openAIMessages: Record<string, unknown>[] = [];
-    for (const msg of messages) {
-      openAIMessages.push(...this.convertSingleMessageWithLogging(msg));
-    }
+    // Convert messages and categorize tokens
+    const { messages: openAIMessages, categoryTokens } = this.convertMessagesWithCategories(messages);
+    const { messagesTokens, filesTokens, toolResultsTokens } = categoryTokens;
     this.outputChannel.appendLine(`Converted to ${openAIMessages.length} OpenAI messages`);
+    this.outputChannel.appendLine(`Token breakdown: messages=${messagesTokens}, files=${filesTokens}, toolResults=${toolResultsTokens}`);
 
     // Log message structure
     for (let i = 0; i < openAIMessages.length; i++) {
@@ -1392,21 +1433,42 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     // Update token statistics display if enabled
     if (tokenStatisticsEnabled) {
-      // Calculate estimated token breakdown
-      const systemPercentage = 13; // System Instructions ~13%
-      const toolsPercentage = options.tools ? Math.min(20, Math.ceil((toolsTokenEstimate / estimatedInputTokens) * 100)) : 0;
-      const messagesPercentage = 100 - systemPercentage - toolsPercentage;
+      // Calculate total tokens including tools overhead
+      const totalTokens = estimatedInputTokens + toolsOverhead;
 
-      const details = [
+      // Calculate percentages based on categorized tokens
+      const systemTokens = Math.floor(totalTokens * 0.13); // System Instructions ~13%
+      const toolDefTokens = options.tools ? toolsOverhead : 0;
+
+      // Calculate actual percentages
+      const systemPercentage = Math.round((systemTokens / totalTokens) * 100);
+      const toolDefPercentage = Math.round((toolDefTokens / totalTokens) * 100);
+      const messagesPercentage = Math.round((messagesTokens / totalTokens) * 100);
+      const filesPercentage = Math.round((filesTokens / totalTokens) * 100);
+      const toolResultsPercentage = Math.round((toolResultsTokens / totalTokens) * 100);
+
+      // Build details array with all 5 categories
+      const details: Array<{ category: string; label: string; percentage: number }> = [
         { category: 'System', label: 'System Instructions', percentage: systemPercentage },
-        ...(options.tools ? [{ category: 'System', label: 'Tool Definitions', percentage: toolsPercentage }] : []),
-        { category: 'User Context', label: 'Messages', percentage: messagesPercentage },
-        // TODO: Files and Tool Results require parsing message content to categorize
-        // { category: 'User Context', label: 'Files', percentage: 0 },
-        // { category: 'User Context', label: 'Tool Results', percentage: 0 },
       ];
 
-      this.updateTokenStatusBar(estimatedInputTokens, modelMaxContext, details);
+      if (options.tools && toolDefTokens > 0) {
+        details.push({ category: 'System', label: 'Tool Definitions', percentage: toolDefPercentage });
+      }
+
+      if (messagesTokens > 0) {
+        details.push({ category: 'User Context', label: 'Messages', percentage: messagesPercentage });
+      }
+
+      if (filesTokens > 0) {
+        details.push({ category: 'User Context', label: 'Files', percentage: filesPercentage });
+      }
+
+      if (toolResultsTokens > 0) {
+        details.push({ category: 'User Context', label: 'Tool Results', percentage: toolResultsPercentage });
+      }
+
+      this.updateTokenStatusBar(totalTokens, modelMaxContext, details);
     }
 
     // Build request

@@ -27,6 +27,8 @@
   "config.enableDebugLogs.markdownDescription": "启用后，将输出详细的 Token 计数日志到 LLM Gateway 输出通道。默认值：false",
   "config.enableTokenStatistics.description": "启用 Token 使用量统计和状态栏显示",
   "config.enableTokenStatistics.markdownDescription": "启用后，在状态栏显示当前会话 Token 使用百分比，并允许手动压缩上下文。默认值：false",
+  "config.enableCopilotUsageReport.description": "向 Copilot Chat 上下文窗口报告 Token 使用量（实验性）",
+  "config.enableCopilotUsageReport.markdownDescription": "启用后，将 Token 使用量报告给 Copilot Chat 的原生上下文窗口显示。这是实验性功能，可能无法在所有 VS Code 版本中正常工作。默认值：false",
   "command.testConnection.title": "测试服务器连接",
   "command.openConfig.title": "打开配置",
   "command.reloadConfig.title": "重新加载配置",
@@ -57,10 +59,9 @@
   "token.compactContext": "整理对话上下文",
   "token.compactDescription": "在 Copilot Chat 中输入 /compact 来总结对话",
   "token.close": "关闭",
-  "没有活动会话可整理": "没有活动会话可压缩",
+  "token.noActiveSession": "没有活动会话可整理",
+  "token.statusBarTooltip": "Token 使用: {0} / {1} ({2}%)\n点击查看详情和整理",
   "token.contextCompressed": "聊天历史已清除，Token 使用量减少",
-  "Token 使用: {0} / {1} ({2}%)
-点击查看详情和整理": "Token 使用: {0} / {1} ({2}%)\n点击查看详情和压缩",
   "token.compressConfirmMessage": "Token 使用: {0} / {1}\n\n是否压缩上下文以减少 Token 使用？",
   "token.compressButton": "压缩",
   "token.cancelButton": "取消"

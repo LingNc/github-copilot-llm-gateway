@@ -170,7 +170,11 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     this.currentModelMaxTokens = maxTokens;
 
     const percentage = Math.round((usedTokens / maxTokens) * 100);
-    const color = percentage > 90 ? '#ff6b6b' : percentage > 70 ? '#ffd93d' : '#6bcf7f';
+    // Status bar color: blue (safe), yellow (warning), red (critical)
+    // Using VS Code theme colors for better integration
+    const color = percentage > 90 ? new vscode.ThemeColor('statusBarItem.errorForeground')
+      : percentage > 70 ? new vscode.ThemeColor('statusBarItem.warningForeground')
+      : new vscode.ThemeColor('charts.blue');
 
     this.tokenStatusBarItem.text = `$(symbol-keyword) ${percentage}%`;
     this.tokenStatusBarItem.color = color;
@@ -1575,16 +1579,22 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
         // Report token usage if the API supports it (fallback)
         // Note: progress.usage is part of the proposed API and may not be available in all VS Code versions
-        if (typeof (progress as any).usage === 'function') {
-          (progress as any).usage({
-            promptTokens,
-            completionTokens,
-            outputBuffer: safeMaxOutputTokens,
-            promptTokenDetails,
-          });
-          this.outputChannel.appendLine(`Token usage reported via usage(): prompt=${promptTokens}, completion=${completionTokens}, outputBuffer=${safeMaxOutputTokens}`);
+        // This feature is controlled by enableCopilotUsageReport setting (default: false) due to potential compatibility issues
+        const copilotUsageReportEnabled = vscode.workspace.getConfiguration('github.copilot.llm-gateway').get<boolean>('enableCopilotUsageReport', false);
+        if (copilotUsageReportEnabled && typeof (progress as any).usage === 'function') {
+          try {
+            (progress as any).usage({
+              promptTokens,
+              completionTokens,
+              outputBuffer: safeMaxOutputTokens,
+              promptTokenDetails,
+            });
+            this.outputChannel.appendLine(`Token usage reported via usage(): prompt=${promptTokens}, completion=${completionTokens}, outputBuffer=${safeMaxOutputTokens}`);
+          } catch (usageError) {
+            this.outputChannel.appendLine(`Token usage via usage() failed (API may have changed): ${usageError}`);
+          }
         } else {
-          this.outputChannel.appendLine(`Token usage (API not supported): prompt=${promptTokens}, completion=${completionTokens}`);
+          this.outputChannel.appendLine(`Token usage tracking: prompt=${promptTokens}, completion=${completionTokens}`);
         }
       }
 

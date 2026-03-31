@@ -41,6 +41,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   // Debug counter for token count calls
   private tokenCountCallCount = 0;
   private lastTokenCountLogTime = 0;
+  // Track total prompt tokens for the current session
+  private currentSessionPromptTokens = 0;
+  private currentSessionCompletionTokens = 0;
 
   constructor(
     context: vscode.ExtensionContext,
@@ -1164,6 +1167,33 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       `Token estimate: input=${estimatedInputTokens}, tools=${toolsOverhead}, model_context=${modelMaxContext}, chosen_max_tokens=${safeMaxOutputTokens}`
     );
 
+    // HACK: Attempt to inject usage method into progress object
+    // This is a workaround for the VS Code API limitation where external providers
+    // cannot access the internal ChatResponseStream.usage() method
+    try {
+      const progressAny = progress as any;
+      if (!progressAny.usage || typeof progressAny.usage !== 'function') {
+        // Try to find the internal _progress or stream object
+        const target = progressAny._progress || progressAny;
+        if (target && typeof target === 'object') {
+          // Inject usage method that will be called when we report token usage
+          Object.defineProperty(target, 'usage', {
+            value: (usage: { promptTokens: number; completionTokens: number; outputBuffer?: number }) => {
+              this.outputChannel.appendLine(`[HACK] usage() called with: ${JSON.stringify(usage)}`);
+              // Store for later retrieval
+              this.currentSessionPromptTokens = usage.promptTokens;
+              this.currentSessionCompletionTokens = usage.completionTokens;
+            },
+            writable: true,
+            configurable: true
+          });
+          this.outputChannel.appendLine('[HACK] Successfully injected usage method into progress object');
+        }
+      }
+    } catch (e) {
+      this.outputChannel.appendLine(`[HACK] Failed to inject usage method: ${e}`);
+    }
+
     // Build request
     const hasTools = (modelCapabilities?.toolCalling ?? this.gatewayConfig.enableToolCalling) &&
                      options.tools && options.tools.length > 0;
@@ -1377,6 +1407,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   ): Promise<number> {
     this.tokenCountCallCount++;
 
+    // Check if debug logs are enabled
+    const config = vscode.workspace.getConfiguration('github.copilot.llm-gateway');
+    const debugLogsEnabled = config.get<boolean>('enableDebugLogs', false);
+
     let content: string;
 
     if (typeof text === 'string') {
@@ -1401,9 +1435,11 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       content = parts.join('\n');
     }
 
-    // Log call details with stack trace to debug frequent calls
-    const stack = new Error().stack?.split('\n').slice(3, 6).join(' | ') || 'no stack';
-    this.outputChannel.appendLine(`[TokenCount #${this.tokenCountCallCount}] len=${content.length} | ${stack}`);
+    // Log call details with stack trace to debug frequent calls (only if debug enabled)
+    if (debugLogsEnabled) {
+      const stack = new Error().stack?.split('\n').slice(3, 6).join(' | ') || 'no stack';
+      this.outputChannel.appendLine(`[TokenCount #${this.tokenCountCallCount}] len=${content.length} | ${stack}`);
+    }
 
     try {
       // Lazy load tiktoken encoder with caching
@@ -1416,18 +1452,24 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       if (this.tiktokenEncoder) {
         const tokens = this.tiktokenEncoder.encode(content);
         const count = tokens.length;
-        this.outputChannel.appendLine(`  -> tiktoken: ${count} tokens`);
+        if (debugLogsEnabled) {
+          this.outputChannel.appendLine(`  -> tiktoken: ${count} tokens`);
+        }
         return count;
       } else {
         // Fallback if encoder failed to load
         const count = Math.ceil(content.length / 4);
-        this.outputChannel.appendLine(`  -> fallback: ${count} tokens`);
+        if (debugLogsEnabled) {
+          this.outputChannel.appendLine(`  -> fallback: ${count} tokens`);
+        }
         return count;
       }
     } catch (error) {
       // Fallback to character-based estimation
       const count = Math.ceil(content.length / 4);
-      this.outputChannel.appendLine(`  -> fallback(error): ${count} tokens`);
+      if (debugLogsEnabled) {
+        this.outputChannel.appendLine(`  -> fallback(error): ${count} tokens`);
+      }
       return count;
     }
   }

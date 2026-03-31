@@ -182,6 +182,13 @@
           "description": "%config.configMode.description%",
           "markdownDescription": "%config.configMode.markdownDescription%",
           "order": 12
+        },
+        "github.copilot.llm-gateway.enableDebugLogs": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable detailed debug logs for token counting",
+          "markdownDescription": "When enabled, outputs detailed token counting logs to the LLM Gateway output channel",
+          "order": 13
         }
       }
     }

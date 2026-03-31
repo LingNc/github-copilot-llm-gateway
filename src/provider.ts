@@ -114,6 +114,19 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   }
 
   /**
+   * Format number with K/M suffix
+   */
+  private formatNumber(num: number): string {
+    if (num >= 1000000) {
+      return (num / 1000000).toFixed(1) + 'M';
+    }
+    if (num >= 1000) {
+      return (num / 1000).toFixed(1) + 'K';
+    }
+    return num.toString();
+  }
+
+  /**
    * Update token status bar with current usage
    */
   private updateTokenStatusBar(usedTokens: number, maxTokens: number, details?: Array<{ category: string; label: string; percentage: number }>): void {
@@ -133,21 +146,29 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     tooltip.supportHtml = true;
     tooltip.isTrusted = true;
 
-    // Header
+    // Header - 上下文窗口
     tooltip.appendMarkdown(`**${vscode.l10n.t('token.contextWindow')}**\n\n`);
-    tooltip.appendMarkdown(`${vscode.l10n.t('token.used')}: ${usedTokens.toLocaleString()} / ${maxTokens.toLocaleString()} ${vscode.l10n.t('token.tokens')} (${percentage}%)\n\n`);
+
+    // Token count with K format: 56.2K/160K 个令牌
+    tooltip.appendMarkdown(`${this.formatNumber(usedTokens)}/${this.formatNumber(maxTokens)} ${vscode.l10n.t('token.tokens')}\n\n`);
+
+    // Percentage
+    tooltip.appendMarkdown(`**${percentage}%**\n\n`);
 
     // Progress bar using unicode characters
     const filled = Math.round(percentage / 5);
     const empty = 20 - filled;
     const bar = '█'.repeat(filled) + '░'.repeat(empty);
     const barColor = percentage > 90 ? '🔴' : percentage > 70 ? '🟡' : '🟢';
-    tooltip.appendMarkdown(`${barColor} ${bar} ${percentage}%\n\n`);
+    tooltip.appendMarkdown(`${barColor} ${bar}\n\n`);
+
+    // Remaining tokens
+    const remaining = maxTokens - usedTokens;
+    tooltip.appendMarkdown(`${vscode.l10n.t('token.remainingForResponse')}\n\n`);
 
     // Category breakdown
     if (details && details.length > 0) {
       tooltip.appendMarkdown(`---\n\n`);
-      tooltip.appendMarkdown(`**${vscode.l10n.t('token.details')}**\n\n`);
 
       // Group by category
       const byCategory = new Map<string, Array<{ label: string; percentage: number }>>();
@@ -159,21 +180,17 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       }
 
       for (const [category, items] of byCategory) {
-        tooltip.appendMarkdown(`**${category}**\n`);
+        tooltip.appendMarkdown(`**${category}**\n\n`);
         for (const item of items) {
-          tooltip.appendMarkdown(`  • ${item.label}: ${item.percentage}%\n`);
+          tooltip.appendMarkdown(`${item.label}\n`);
+          tooltip.appendMarkdown(`${item.percentage}%\n\n`);
         }
-        tooltip.appendMarkdown(`\n`);
       }
     }
 
-    // Remaining tokens
-    const remaining = maxTokens - usedTokens;
+    // Compress button using command link
     tooltip.appendMarkdown(`---\n\n`);
-    tooltip.appendMarkdown(`${vscode.l10n.t('token.remainingForResponse')}: ${remaining.toLocaleString()} ${vscode.l10n.t('token.tokens')}\n\n`);
-
-    // Action hint
-    tooltip.appendMarkdown(`*${vscode.l10n.t('token.clickToCompress')}*`);
+    tooltip.appendMarkdown(`[${vscode.l10n.t('token.compressContext')}](command:github.copilot.llm-gateway.compressContext "${vscode.l10n.t('token.compressDescription')}")`);
 
     this.tokenStatusBarItem.tooltip = tooltip;
     this.tokenStatusBarItem.show();

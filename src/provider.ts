@@ -46,6 +46,11 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   private currentSessionCompletionTokens = 0;
   // Cache debug logs setting to avoid repeated config lookups
   private debugLogsEnabled = false;
+  // Status bar item for token usage display
+  private tokenStatusBarItem: vscode.StatusBarItem | undefined;
+  // Current session token statistics
+  private currentContextTokens = 0;
+  private currentModelMaxTokens = 0;
 
   constructor(
     context: vscode.ExtensionContext,
@@ -59,6 +64,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     this.gatewayConfig = this.loadDefaultConfig();
     this.defaultClient = new GatewayClient(this.gatewayConfig);
 
+    // Initialize status bar item
+    this.initializeStatusBar(context);
+
     // Watch for configuration changes
     context.subscriptions.push(
       vscode.workspace.onDidChangeConfiguration((e: vscode.ConfigurationChangeEvent) => {
@@ -71,6 +79,84 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     // Initialize cached debug setting
     this.updateDebugSettings();
+  }
+
+  /**
+   * Initialize status bar item for token display
+   */
+  private initializeStatusBar(context: vscode.ExtensionContext): void {
+    const config = vscode.workspace.getConfiguration('github.copilot.llm-gateway');
+    const tokenStatisticsEnabled = config.get<boolean>('enableTokenStatistics', true);
+
+    if (tokenStatisticsEnabled) {
+      this.tokenStatusBarItem = vscode.window.createStatusBarItem(
+        vscode.StatusBarAlignment.Right,
+        100
+      );
+      this.tokenStatusBarItem.command = 'github.copilot.llm-gateway.compressContext';
+      context.subscriptions.push(this.tokenStatusBarItem);
+      this.updateStatusBarVisibility();
+    }
+  }
+
+  /**
+   * Update status bar visibility based on active chat session
+   */
+  private updateStatusBarVisibility(): void {
+    if (!this.tokenStatusBarItem) return;
+
+    // Show status bar when there's an active chat session
+    const hasActiveSession = vscode.window.visibleTextEditors.length > 0 ||
+                             vscode.window.activeTerminal !== undefined;
+    if (hasActiveSession) {
+      this.tokenStatusBarItem.show();
+    } else {
+      this.tokenStatusBarItem.hide();
+    }
+  }
+
+  /**
+   * Update token status bar with current usage
+   */
+  private updateTokenStatusBar(usedTokens: number, maxTokens: number): void {
+    if (!this.tokenStatusBarItem) return;
+
+    this.currentContextTokens = usedTokens;
+    this.currentModelMaxTokens = maxTokens;
+
+    const percentage = Math.round((usedTokens / maxTokens) * 100);
+    const color = percentage > 90 ? '#ff6b6b' : percentage > 70 ? '#ffd93d' : '#6bcf7f';
+
+    this.tokenStatusBarItem.text = `$(symbol-keyword) ${percentage}%`;
+    this.tokenStatusBarItem.tooltip = `Token Usage: ${usedTokens.toLocaleString()} / ${maxTokens.toLocaleString()} (${percentage}%)\nClick to compress context`;
+    this.tokenStatusBarItem.color = color;
+    this.tokenStatusBarItem.show();
+
+    this.outputChannel.appendLine(`[Token Statistics] ${usedTokens}/${maxTokens} (${percentage}%)`);
+  }
+
+  /**
+   * Compress context to reduce token usage
+   */
+  public async compressContext(): Promise<void> {
+    if (this.currentContextTokens === 0) {
+      vscode.window.showInformationMessage('LLM Gateway: No active session to compress');
+      return;
+    }
+
+    const result = await vscode.window.showWarningMessage(
+      `Token Usage: ${this.currentContextTokens.toLocaleString()} / ${this.currentModelMaxTokens.toLocaleString()} tokens\n\nCompress context to reduce token usage?`,
+      { modal: true },
+      'Compress',
+      'Cancel'
+    );
+
+    if (result === 'Compress') {
+      this.outputChannel.appendLine('[Token Statistics] Context compression requested');
+      // Trigger context compression via command
+      await vscode.commands.executeCommand('workbench.action.chat.clear');
+      vscode.window.showInformationMessage('LLM Gateway: Chat history cleared to reduce token usage');
+    }
   }
 
   /**
@@ -1119,7 +1205,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   ): Promise<void> {
     // Get configuration for this request (once per request)
     const config = vscode.workspace.getConfiguration('github.copilot.llm-gateway');
-    const tokenUsageHackEnabled = config.get<boolean>('enableTokenUsageHack', false);
+    const tokenStatisticsEnabled = config.get<boolean>('enableTokenStatistics', true);
     // Update cached debug setting for this request
     this.debugLogsEnabled = config.get<boolean>('enableDebugLogs', false);
 
@@ -1186,39 +1272,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       `Token estimate: input=${estimatedInputTokens}, tools=${toolsOverhead}, model_context=${modelMaxContext}, chosen_max_tokens=${safeMaxOutputTokens}`
     );
 
-    // HACK: Attempt to inject usage method into progress object
-    // This is a workaround for the VS Code API limitation where external providers
-    // cannot access the internal ChatResponseStream.usage() method
-    if (tokenUsageHackEnabled) {
-      try {
-        const progressAny = progress as any;
-        if (!progressAny.usage || typeof progressAny.usage !== 'function') {
-          // Try to find the internal _progress or stream object
-          const target = progressAny._progress || progressAny;
-          if (target && typeof target === 'object') {
-            // Inject usage method that will be called when we report token usage
-            Object.defineProperty(target, 'usage', {
-              value: (usage: { promptTokens: number; completionTokens: number; outputBuffer?: number }) => {
-                if (this.debugLogsEnabled) {
-                  this.outputChannel.appendLine(`[HACK] usage() called with: ${JSON.stringify(usage)}`);
-                }
-                // Store for later retrieval
-                this.currentSessionPromptTokens = usage.promptTokens;
-                this.currentSessionCompletionTokens = usage.completionTokens;
-              },
-              writable: true,
-              configurable: true
-            });
-            if (this.debugLogsEnabled) {
-              this.outputChannel.appendLine('[HACK] Successfully injected usage method into progress object');
-            }
-          }
-        }
-      } catch (e) {
-        if (this.debugLogsEnabled) {
-          this.outputChannel.appendLine(`[HACK] Failed to inject usage method: ${e}`);
-        }
-      }
+    // Update token statistics display if enabled
+    if (tokenStatisticsEnabled) {
+      this.updateTokenStatusBar(estimatedInputTokens, modelMaxContext);
     }
 
     // Build request

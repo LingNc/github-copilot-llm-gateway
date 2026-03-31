@@ -101,6 +101,20 @@ function registerCommands(
   // Register config management commands
   registerConfigCommands(context, configManager);
 
+  // Compress context command
+  const compressContextCommand = vscode.commands.registerCommand(
+    'github.copilot.llm-gateway.compressContext',
+    async () => {
+      const provider = providerManager.getProvider();
+      if (provider) {
+        await provider.compressContext();
+      } else {
+        vscode.window.showErrorMessage('LLM Gateway: Provider not initialized.');
+      }
+    }
+  );
+  context.subscriptions.push(compressContextCommand);
+
   outputChannel.appendLine(`Registered commands`);
 }
 

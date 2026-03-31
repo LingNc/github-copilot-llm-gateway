@@ -186,6 +186,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     // Group details by category
     const systemItems: Array<{ label: string; percentage: number }> = [];
+    const toolItems: Array<{ label: string; percentage: number }> = [];
     const userContextItems: Array<{ label: string; percentage: number }> = [];
 
     if (details && details.length > 0) {
@@ -193,6 +194,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         const cat = detail.category.toLowerCase();
         if (cat.includes('system')) {
           systemItems.push(detail);
+        } else if (cat.includes('tool')) {
+          toolItems.push(detail);
         } else if (cat.includes('user')) {
           userContextItems.push(detail);
         }
@@ -219,6 +222,16 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     if (systemItems.length > 0) {
       tooltip.appendMarkdown(`**${this.getLocalizedString('token.system').toUpperCase()}**\n\n`);
       for (const item of systemItems) {
+        const label = item.label.length > 26 ? item.label.substring(0, 23) + '...' : item.label;
+        const usedPercentage = usedTokens > 0 ? Math.round((item.percentage / 100) * (usedTokens / maxTokens) * 100) : 0;
+        tooltip.appendMarkdown(`${label.padEnd(25)} ${usedPercentage.toString().padStart(3)}%\n`);
+      }
+      tooltip.appendMarkdown(`\n`);
+    }
+
+    if (toolItems.length > 0) {
+      tooltip.appendMarkdown(`**${this.getLocalizedString('token.tools').toUpperCase()}**\n\n`);
+      for (const item of toolItems) {
         const label = item.label.length > 26 ? item.label.substring(0, 23) + '...' : item.label;
         const usedPercentage = usedTokens > 0 ? Math.round((item.percentage / 100) * (usedTokens / maxTokens) * 100) : 0;
         tooltip.appendMarkdown(`${label.padEnd(25)} ${usedPercentage.toString().padStart(3)}%\n`);
@@ -1383,7 +1396,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       .join('\n');
 
     const toolsOverhead = options.tools ? Math.ceil(this.safeStringify(options.tools).length / 4) : 0;
-    const estimatedInputTokens = await this.provideTokenCount(model, inputText, token);
+    const estimatedInputTokens = await this.provideTokenCount(model, inputText, token) + toolsOverhead;
     const safeMaxOutputTokens = this.calculateSafeMaxOutputTokens(estimatedInputTokens, toolsOverhead, model.id);
 
     this.outputChannel.appendLine(

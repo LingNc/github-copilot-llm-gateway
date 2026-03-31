@@ -44,6 +44,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   // Track total prompt tokens for the current session
   private currentSessionPromptTokens = 0;
   private currentSessionCompletionTokens = 0;
+  // Cache debug logs setting to avoid repeated config lookups
+  private debugLogsEnabled = false;
 
   constructor(
     context: vscode.ExtensionContext,
@@ -66,6 +68,17 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         }
       })
     );
+
+    // Initialize cached debug setting
+    this.updateDebugSettings();
+  }
+
+  /**
+   * Update cached debug settings
+   */
+  private updateDebugSettings(): void {
+    const config = vscode.workspace.getConfiguration('github.copilot.llm-gateway');
+    this.debugLogsEnabled = config.get<boolean>('enableDebugLogs', false);
   }
 
   /**
@@ -1104,10 +1117,11 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     progress: vscode.Progress<vscode.LanguageModelResponsePart>,
     token: vscode.CancellationToken
   ): Promise<void> {
-    // Get configuration for this request
+    // Get configuration for this request (once per request)
     const config = vscode.workspace.getConfiguration('github.copilot.llm-gateway');
     const tokenUsageHackEnabled = config.get<boolean>('enableTokenUsageHack', false);
-    const debugLogsEnabled = config.get<boolean>('enableDebugLogs', false);
+    // Update cached debug setting for this request
+    this.debugLogsEnabled = config.get<boolean>('enableDebugLogs', false);
 
     this.outputChannel.appendLine(`Sending chat request to model: ${model.id}`);
     this.outputChannel.appendLine(`Tool mode: ${options.toolMode}, Tools: ${options.tools?.length || 0}`);
@@ -1185,7 +1199,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
             // Inject usage method that will be called when we report token usage
             Object.defineProperty(target, 'usage', {
               value: (usage: { promptTokens: number; completionTokens: number; outputBuffer?: number }) => {
-                if (debugLogsEnabled) {
+                if (this.debugLogsEnabled) {
                   this.outputChannel.appendLine(`[HACK] usage() called with: ${JSON.stringify(usage)}`);
                 }
                 // Store for later retrieval
@@ -1195,13 +1209,13 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
               writable: true,
               configurable: true
             });
-            if (debugLogsEnabled) {
+            if (this.debugLogsEnabled) {
               this.outputChannel.appendLine('[HACK] Successfully injected usage method into progress object');
             }
           }
         }
       } catch (e) {
-        if (debugLogsEnabled) {
+        if (this.debugLogsEnabled) {
           this.outputChannel.appendLine(`[HACK] Failed to inject usage method: ${e}`);
         }
       }
@@ -1420,36 +1434,37 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   ): Promise<number> {
     this.tokenCountCallCount++;
 
-    // Check if debug logs are enabled
-    const config = vscode.workspace.getConfiguration('github.copilot.llm-gateway');
-    const debugLogsEnabled = config.get<boolean>('enableDebugLogs', false);
-
     let content: string;
 
     if (typeof text === 'string') {
       content = text;
     } else {
-      // Extract content from all part types, not just text parts
-      const parts: string[] = [];
-      for (const part of text.content) {
-        if (part instanceof vscode.LanguageModelTextPart) {
-          parts.push(part.value);
-        } else if (part instanceof vscode.LanguageModelToolResultPart) {
-          // Include tool result content
-          parts.push(`Tool result: ${part.callId}`);
-        } else if (part instanceof vscode.LanguageModelToolCallPart) {
-          // Include tool call content
-          parts.push(`Tool call: ${part.name}`);
-        } else if (part instanceof vscode.LanguageModelDataPart) {
-          // Include data part (usually binary data like images)
-          parts.push(`[Data: ${part.mimeType}, ${part.data.length} bytes]`);
+      // Fast path for string content messages
+      if (text.content.length === 1 && text.content[0] instanceof vscode.LanguageModelTextPart) {
+        content = text.content[0].value;
+      } else {
+        // Extract content from all part types, not just text parts
+        const parts: string[] = [];
+        for (const part of text.content) {
+          if (part instanceof vscode.LanguageModelTextPart) {
+            parts.push(part.value);
+          } else if (part instanceof vscode.LanguageModelToolResultPart) {
+            // Include tool result content
+            parts.push(`Tool result: ${part.callId}`);
+          } else if (part instanceof vscode.LanguageModelToolCallPart) {
+            // Include tool call content
+            parts.push(`Tool call: ${part.name}`);
+          } else if (part instanceof vscode.LanguageModelDataPart) {
+            // Include data part (usually binary data like images)
+            parts.push(`[Data: ${part.mimeType}, ${part.data.length} bytes]`);
+          }
         }
+        content = parts.join('\n');
       }
-      content = parts.join('\n');
     }
 
     // Log call details with stack trace to debug frequent calls (only if debug enabled)
-    if (debugLogsEnabled) {
+    if (this.debugLogsEnabled) {
       const stack = new Error().stack?.split('\n').slice(3, 6).join(' | ') || 'no stack';
       this.outputChannel.appendLine(`[TokenCount #${this.tokenCountCallCount}] len=${content.length} | ${stack}`);
     }
@@ -1465,14 +1480,14 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       if (this.tiktokenEncoder) {
         const tokens = this.tiktokenEncoder.encode(content);
         const count = tokens.length;
-        if (debugLogsEnabled) {
+        if (this.debugLogsEnabled) {
           this.outputChannel.appendLine(`  -> tiktoken: ${count} tokens`);
         }
         return count;
       } else {
         // Fallback if encoder failed to load
         const count = Math.ceil(content.length / 4);
-        if (debugLogsEnabled) {
+        if (this.debugLogsEnabled) {
           this.outputChannel.appendLine(`  -> fallback: ${count} tokens`);
         }
         return count;
@@ -1480,7 +1495,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     } catch (error) {
       // Fallback to character-based estimation
       const count = Math.ceil(content.length / 4);
-      if (debugLogsEnabled) {
+      if (this.debugLogsEnabled) {
         this.outputChannel.appendLine(`  -> fallback(error): ${count} tokens`);
       }
       return count;
@@ -1568,6 +1583,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     this.defaultClient.updateConfig(this.gatewayConfig);
     // Clear client cache to force recreation with new config
     this.clients.clear();
+    // Update cached debug settings
+    this.updateDebugSettings();
     this.outputChannel.appendLine('Configuration reloaded');
   }
 }

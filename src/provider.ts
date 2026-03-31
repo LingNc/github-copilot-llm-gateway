@@ -118,7 +118,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   /**
    * Update token status bar with current usage
    */
-  private updateTokenStatusBar(usedTokens: number, maxTokens: number): void {
+  private updateTokenStatusBar(usedTokens: number, maxTokens: number, details?: Array<{ category: string; label: string; percentage: number }>): void {
     if (!this.tokenStatusBarItem) return;
 
     this.currentContextTokens = usedTokens;
@@ -128,15 +128,28 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     const color = percentage > 90 ? '#ff6b6b' : percentage > 70 ? '#ffd93d' : '#6bcf7f';
 
     this.tokenStatusBarItem.text = `$(symbol-keyword) ${percentage}%`;
-    this.tokenStatusBarItem.tooltip = `Token Usage: ${usedTokens.toLocaleString()} / ${maxTokens.toLocaleString()} (${percentage}%)\nClick to compress context`;
+    this.tokenStatusBarItem.tooltip = `Token Usage: ${usedTokens.toLocaleString()} / ${maxTokens.toLocaleString()} (${percentage}%)\nClick for details & compress`;
     this.tokenStatusBarItem.color = color;
     this.tokenStatusBarItem.show();
+
+    // Update token details if provided
+    if (details) {
+      this.tokenDetails = details.map(d => ({
+        ...d,
+        tokens: Math.round((d.percentage / 100) * usedTokens)
+      }));
+    }
 
     this.outputChannel.appendLine(`[Token Statistics] ${usedTokens}/${maxTokens} (${percentage}%)`);
   }
 
   /**
-   * Compress context to reduce token usage
+   * Token detail categories for display
+   */
+  private tokenDetails: Array<{ category: string; label: string; tokens: number; percentage: number }> = [];
+
+  /**
+   * Show token usage details and compress context
    */
   public async compressContext(): Promise<void> {
     if (this.currentContextTokens === 0) {
@@ -144,19 +157,88 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       return;
     }
 
-    const result = await vscode.window.showWarningMessage(
-      `Token Usage: ${this.currentContextTokens.toLocaleString()} / ${this.currentModelMaxTokens.toLocaleString()} tokens\n\nCompress context to reduce token usage?`,
-      { modal: true },
-      'Compress',
-      'Cancel'
-    );
+    const percentage = Math.round((this.currentContextTokens / this.currentModelMaxTokens) * 100);
+    const remainingTokens = this.currentModelMaxTokens - this.currentContextTokens;
 
-    if (result === 'Compress') {
-      this.outputChannel.appendLine('[Token Statistics] Context compression requested');
-      // Trigger context compression via command
-      await vscode.commands.executeCommand('workbench.action.chat.clear');
-      vscode.window.showInformationMessage('LLM Gateway: Chat history cleared to reduce token usage');
+    // Create detailed message
+    let detailMessage = `**上下文窗口**\n`;
+    detailMessage += `${(this.currentContextTokens / 1000).toFixed(1)}K/${(this.currentModelMaxTokens / 1000).toFixed(0)}K tokens\n`;
+    detailMessage += `${percentage}% 已使用\n`;
+    detailMessage += `${(remainingTokens / 1000).toFixed(1)}K 保留用于响应\n\n`;
+
+    // Add category breakdown
+    if (this.tokenDetails.length > 0) {
+      // Group by category
+      const byCategory: Record<string, Array<{ label: string; tokens: number; percentage: number }>> = {};
+      for (const detail of this.tokenDetails) {
+        if (!byCategory[detail.category]) {
+          byCategory[detail.category] = [];
+        }
+        byCategory[detail.category].push(detail);
+      }
+
+      for (const [category, items] of Object.entries(byCategory)) {
+        detailMessage += `**${category}**\n`;
+        for (const item of items) {
+          detailMessage += `${item.label}: ${item.percentage}%\n`;
+        }
+        detailMessage += `\n`;
+      }
+    } else {
+      // Default breakdown estimation
+      const systemTokens = Math.round(this.currentContextTokens * 0.13);
+      const toolTokens = Math.round(this.currentContextTokens * 0.15);
+      const messageTokens = Math.round(this.currentContextTokens * 0.72);
+
+      detailMessage += `**System**\n`;
+      detailMessage += `System Instructions: ${Math.round((systemTokens / this.currentContextTokens) * 100)}%\n\n`;
+      detailMessage += `**Tool Definitions**\n`;
+      detailMessage += `Tools: ${Math.round((toolTokens / this.currentContextTokens) * 100)}%\n\n`;
+      detailMessage += `**User Context**\n`;
+      detailMessage += `Messages: ${Math.round((messageTokens / this.currentContextTokens) * 100)}%\n`;
     }
+
+    // Use QuickPick for better styling
+    const quickPick = vscode.window.createQuickPick();
+    quickPick.title = 'LLM Gateway Token Usage';
+    quickPick.placeholder = 'Token usage details';
+    quickPick.ignoreFocusOut = false;
+
+    // Create items for display
+    const items: vscode.QuickPickItem[] = [
+      { label: detailMessage, kind: vscode.QuickPickItemKind.Separator },
+      { label: '', kind: vscode.QuickPickItemKind.Separator },
+      { label: '$(clear-all) 压缩对话上下文', description: '清除历史消息以减少 token 使用量', alwaysShow: true },
+      { label: '$(close) 关闭', alwaysShow: true }
+    ];
+
+    quickPick.items = items;
+    quickPick.activeItems = [];
+
+    // Handle selection
+    quickPick.onDidAccept(() => {
+      const selected = quickPick.selectedItems[0];
+      if (selected?.label.includes('压缩对话')) {
+        this.outputChannel.appendLine('[Token Statistics] Context compression requested');
+        vscode.commands.executeCommand('workbench.action.chat.clear')
+          .then(() => {
+            vscode.window.showInformationMessage('LLM Gateway: 聊天历史已清除');
+            // Reset token counts
+            this.currentContextTokens = 0;
+            this.currentSessionPromptTokens = 0;
+            this.currentSessionCompletionTokens = 0;
+            this.tokenDetails = [];
+            this.updateTokenStatusBar(0, this.currentModelMaxTokens);
+          });
+      }
+      quickPick.hide();
+    });
+
+    quickPick.onDidHide(() => {
+      quickPick.dispose();
+    });
+
+    quickPick.show();
   }
 
   /**
@@ -1274,7 +1356,18 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     // Update token statistics display if enabled
     if (tokenStatisticsEnabled) {
-      this.updateTokenStatusBar(estimatedInputTokens, modelMaxContext);
+      // Calculate estimated token breakdown
+      const systemPercentage = 13; // System Instructions ~13%
+      const toolsPercentage = options.tools ? Math.min(20, Math.ceil((toolsTokenEstimate / estimatedInputTokens) * 100)) : 0;
+      const messagesPercentage = 100 - systemPercentage - toolsPercentage;
+
+      const details = [
+        { category: 'System', label: 'System Instructions', percentage: systemPercentage },
+        ...(options.tools ? [{ category: 'Tool Definitions', label: 'Tools', percentage: toolsPercentage }] : []),
+        { category: 'User Context', label: 'Messages', percentage: messagesPercentage },
+      ];
+
+      this.updateTokenStatusBar(estimatedInputTokens, modelMaxContext, details);
     }
 
     // Build request

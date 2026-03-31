@@ -80,6 +80,12 @@
         "command": "github.copilot.llm-gateway.removeProvider",
         "title": "%command.removeProvider.title%",
         "category": "GitHub Copilot LLM Gateway"
+      },
+      {
+        "command": "github.copilot.llm-gateway.compressContext",
+        "title": "%command.compressContext.title%",
+        "category": "GitHub Copilot LLM Gateway",
+        "icon": "$(compress)"
       }
     ],
     "configuration": {
@@ -190,11 +196,11 @@
           "markdownDescription": "%config.enableDebugLogs.markdownDescription%",
           "order": 13
         },
-        "github.copilot.llm-gateway.enableTokenUsageHack": {
+        "github.copilot.llm-gateway.enableTokenStatistics": {
           "type": "boolean",
-          "default": false,
-          "description": "%config.enableTokenUsageHack.description%",
-          "markdownDescription": "%config.enableTokenUsageHack.markdownDescription%",
+          "default": true,
+          "description": "%config.enableTokenStatistics.description%",
+          "markdownDescription": "%config.enableTokenStatistics.markdownDescription%",
           "order": 14
         }
       }

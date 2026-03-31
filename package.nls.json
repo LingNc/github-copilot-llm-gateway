@@ -60,5 +60,5 @@
   "token.statusBarTooltip": "Token Usage: {0} / {1} ({2}%)\nClick for details & compress",
   "token.compressConfirmMessage": "Token Usage: {0} / {1} tokens\n\nCompress context to reduce token usage?",
   "token.compressButton": "Compress",
-  "token.cancelButton": "Cancel",
+  "token.cancelButton": "Cancel"
 }

@@ -91,7 +91,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         vscode.StatusBarAlignment.Right,
         100
       );
-      this.tokenStatusBarItem.command = 'github.copilot.llm-gateway.compressContext';
+      this.tokenStatusBarItem.command = 'github.copilot.llm-gateway.compactContext';
       context.subscriptions.push(this.tokenStatusBarItem);
       this.updateStatusBarVisibility();
     }
@@ -141,7 +141,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           'token.remainingForResponse': '保留用于响应',
           'token.system': 'System',
           'token.userContext': 'User Context',
-          'token.compressContext': '压缩对话上下文',
+          'token.compactContext': '整理对话上下文',
         };
         return translations[key] || key;
       }
@@ -154,7 +154,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         'token.remainingForResponse': '保留用于响应',
         'token.system': 'System',
         'token.userContext': 'User Context',
-        'token.compressContext': '压缩对话上下文',
+        'token.compactContext': '整理对话上下文',
       };
       return translations[key] || key;
     }
@@ -199,22 +199,22 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     const tokenText = `${this.formatNumber(usedTokens)}/${this.formatNumber(maxTokens)} ${this.getLocalizedString('token.tokens')}`;
     const percentageText = `${percentage}%`;
-    tooltip.appendMarkdown(`\`${tokenText.padEnd(30)} ${percentageText.padStart(4)}\`\n\n`);
+    tooltip.appendMarkdown(`${tokenText}  **${percentageText}**\n\n`);
 
     const filled = Math.round((percentage / 100) * 20);
     const empty = 20 - filled;
-    const bar = '█'.repeat(filled) + '░'.repeat(empty);
-    tooltip.appendMarkdown(`\`${bar}\`\n\n`);
+    const bar = '█'.repeat(filled) + '▒'.repeat(empty);
+    tooltip.appendMarkdown(`${bar}\n\n`);
 
     const remaining = maxTokens - usedTokens;
-    tooltip.appendMarkdown(`*${this.formatNumber(remaining)} ${this.getLocalizedString('token.remainingForResponse')}*\n\n`);
+    tooltip.appendMarkdown(`${this.formatNumber(remaining)} ${this.getLocalizedString('token.remainingForResponse')}\n\n`);
     tooltip.appendMarkdown(`---\n\n`);
 
     if (systemItems.length > 0) {
       tooltip.appendMarkdown(`**${this.getLocalizedString('token.system').toUpperCase()}**\n\n`);
       for (const item of systemItems) {
         const label = item.label.length > 26 ? item.label.substring(0, 23) + '...' : item.label;
-        tooltip.appendMarkdown(`| ${label.padEnd(25)} | ${item.percentage.toString().padStart(3)}% |\n`);
+        tooltip.appendMarkdown(`${label.padEnd(25)} ${item.percentage.toString().padStart(3)}%\n`);
       }
       tooltip.appendMarkdown(`\n`);
     }
@@ -223,13 +223,13 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       tooltip.appendMarkdown(`**${this.getLocalizedString('token.userContext').toUpperCase()}**\n\n`);
       for (const item of userContextItems) {
         const label = item.label.length > 25 ? item.label.substring(0, 22) + '...' : item.label;
-        tooltip.appendMarkdown(`| ${label.padEnd(25)} | ${item.percentage.toString().padStart(3)}% |\n`);
+        tooltip.appendMarkdown(`${label.padEnd(25)} ${item.percentage.toString().padStart(3)}%\n`);
       }
       tooltip.appendMarkdown(`\n`);
     }
 
     tooltip.appendMarkdown(`---\n\n`);
-    tooltip.appendMarkdown(`[${this.getLocalizedString('token.compressContext')}](command:github.copilot.llm-gateway.compressContext)\n`);
+    tooltip.appendMarkdown(`[${this.getLocalizedString('token.compactContext')}](command:github.copilot.llm-gateway.compactContext)\n`);
 
     this.tokenStatusBarItem.tooltip = tooltip;
     this.tokenStatusBarItem.show();
@@ -250,35 +250,16 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
    */
   private tokenDetails: Array<{ category: string; label: string; tokens: number; percentage: number }> = [];
 
-  /**
-   * Compress context - directly trigger compression without showing view
-   */
-  public async compressContext(): Promise<void> {
+  public async compactContext(): Promise<void> {
     if (this.currentContextTokens === 0) {
       vscode.window.showInformationMessage(vscode.l10n.t('token.noActiveSession'));
       return;
     }
 
-    // Show confirmation dialog
-    const result = await vscode.window.showWarningMessage(
-      vscode.l10n.t('token.compressConfirmMessage', this.currentContextTokens.toLocaleString(), this.currentModelMaxTokens.toLocaleString()),
-      { modal: true },
-      vscode.l10n.t('token.compressButton'),
-      vscode.l10n.t('token.cancelButton')
-    );
-
-    if (result === vscode.l10n.t('token.compressButton')) {
-      this.outputChannel.appendLine('[Token Statistics] Context compression requested');
-      await vscode.commands.executeCommand('workbench.action.chat.clear');
-      vscode.window.showInformationMessage(vscode.l10n.t('token.contextCompressed'));
-
-      // Reset token counts
-      this.currentContextTokens = 0;
-      this.currentSessionPromptTokens = 0;
-      this.currentSessionCompletionTokens = 0;
-      this.tokenDetails = [];
-      this.updateTokenStatusBar(0, this.currentModelMaxTokens, []);
-    }
+    this.outputChannel.appendLine('[Token Statistics] Opening Copilot Chat with /compact command');
+    await vscode.commands.executeCommand('workbench.panel.chat.view.copilot.focus');
+    await vscode.commands.executeCommand('type', { text: '/compact' });
+    await vscode.commands.executeCommand('workbench.action.chat.submit');
   }
 
   /**

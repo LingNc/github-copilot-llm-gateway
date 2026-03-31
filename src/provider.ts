@@ -163,7 +163,12 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   /**
    * Update token status bar with current usage
    */
-  private updateTokenStatusBar(usedTokens: number, maxTokens: number, details?: Array<{ category: string; label: string; percentage: number }>): void {
+  private updateTokenStatusBar(
+    usedTokens: number,
+    maxTokens: number,
+    reservedTokens: number,
+    details?: Array<{ category: string; label: string; percentage: number }>
+  ): void {
     if (!this.tokenStatusBarItem) return;
 
     this.currentContextTokens = usedTokens;
@@ -171,10 +176,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     const percentage = Math.round((usedTokens / maxTokens) * 100);
     // Status bar color: green (safe), yellow (warning), red (critical)
-    // Using VS Code theme colors for better integration
     const color = percentage > 90 ? new vscode.ThemeColor('statusBarItem.errorForeground')
       : percentage > 70 ? new vscode.ThemeColor('statusBarItem.warningForeground')
-      : new vscode.ThemeColor('statusBarItem.prominentForeground');
+      : '#6bcf7f'; // Green for safe usage
 
     this.tokenStatusBarItem.text = `$(symbol-keyword) ${percentage}%`;
     this.tokenStatusBarItem.color = color;
@@ -212,8 +216,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     const barEmpty = '▒'.repeat(empty);
     tooltip.appendMarkdown(`<span style="color:var(--vscode-charts-blue)">${barFilled}</span><span style="color:var(--vscode-descriptionForeground)">${barEmpty}</span>\n\n`);
 
-    const remaining = maxTokens - usedTokens;
-    tooltip.appendMarkdown(`${this.formatNumber(remaining)} ${this.getLocalizedString('token.remainingForResponse')}\n\n`);
+    // Show reserved tokens for response (similar to Copilot Chat)
+    const reservedPercentage = Math.round((reservedTokens / maxTokens) * 100);
+    tooltip.appendMarkdown(`${this.formatNumber(reservedTokens)} ${this.getLocalizedString('token.remainingForResponse')} (${reservedPercentage}%)\n\n`);
     tooltip.appendMarkdown(`---\n\n`);
 
     if (systemItems.length > 0) {
@@ -349,16 +354,18 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
    * Supports text, images, tools, and tool results
    * Returns both the converted messages and token breakdown by category
    */
-  private convertMessagesWithCategories(
-    messages: readonly vscode.LanguageModelChatMessage[]
-  ): {
+  private async convertMessagesWithCategories(
+    messages: readonly vscode.LanguageModelChatMessage[],
+    model: vscode.LanguageModelChatInformation,
+    token: vscode.CancellationToken
+  ): Promise<{
     messages: Record<string, unknown>[];
     categoryTokens: {
       messagesTokens: number;
       filesTokens: number;
       toolResultsTokens: number;
     };
-  } {
+  }> {
     const openAIMessages: Record<string, unknown>[] = [];
     let messagesTokens = 0;
     let filesTokens = 0;
@@ -374,7 +381,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         if (part instanceof vscode.LanguageModelTextPart) {
           contentParts.push({ type: 'text', text: part.value });
           // Count as messages (this includes regular text and file references)
-          messagesTokens += this.estimateTokenCount(part.value);
+          messagesTokens += await this.provideTokenCount(model, part.value, token);
         } else if (part instanceof vscode.LanguageModelDataPart) {
           // Handle image data - count as files
           if (part.mimeType.startsWith('image/')) {
@@ -383,19 +390,19 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
             contentParts.push({ type: 'image_url', image_url: { url: imageUrl } });
             this.outputChannel.appendLine(`  Added image: ${part.mimeType}, ${part.data.length} bytes`);
             // Count image data as files
-            filesTokens += this.estimateTokenCount(base64Data);
+            filesTokens += await this.provideTokenCount(model, base64Data, token);
           } else {
             // Handle other binary data as text
             const text = Buffer.from(part.data).toString('utf-8');
             contentParts.push({ type: 'text', text });
-            messagesTokens += this.estimateTokenCount(text);
+            messagesTokens += await this.provideTokenCount(model, text, token);
           }
         } else if (part instanceof vscode.LanguageModelToolResultPart) {
           const toolResult = this.convertToolResultPart(part);
           toolResults.push(toolResult);
           // Count tool result content
           const toolResultText = typeof toolResult.content === 'string' ? toolResult.content : this.safeStringify(toolResult.content);
-          toolResultsTokens += this.estimateTokenCount(toolResultText);
+          toolResultsTokens += await this.provideTokenCount(model, toolResultText, token);
         } else if (part instanceof vscode.LanguageModelToolCallPart) {
           toolCalls.push(this.convertToolCallPart(part));
         }
@@ -429,14 +436,6 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         toolResultsTokens,
       },
     };
-  }
-
-  /**
-   * Estimate token count for a string (approximation)
-   * This is a fast estimation: ~4 characters per token
-   */
-  private estimateTokenCount(text: string): number {
-    return Math.ceil(text.length / 4);
   }
 
   /**
@@ -1388,7 +1387,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     const client = this.getClient(providerId);
 
     // Convert messages and categorize tokens
-    const { messages: openAIMessages, categoryTokens } = this.convertMessagesWithCategories(messages);
+    const { messages: openAIMessages, categoryTokens } = await this.convertMessagesWithCategories(messages, model, token);
     const { messagesTokens, filesTokens, toolResultsTokens } = categoryTokens;
     this.outputChannel.appendLine(`Converted to ${openAIMessages.length} OpenAI messages`);
     this.outputChannel.appendLine(`Token breakdown: messages=${messagesTokens}, files=${filesTokens}, toolResults=${toolResultsTokens}`);
@@ -1468,7 +1467,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         details.push({ category: 'User Context', label: 'Tool Results', percentage: toolResultsPercentage });
       }
 
-      this.updateTokenStatusBar(totalTokens, modelMaxContext, details);
+      this.updateTokenStatusBar(totalTokens, modelMaxContext, safeMaxOutputTokens, details);
     }
 
     // Build request

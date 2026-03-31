@@ -186,15 +186,15 @@
         "github.copilot.llm-gateway.enableDebugLogs": {
           "type": "boolean",
           "default": false,
-          "description": "Enable detailed debug logs for token counting",
-          "markdownDescription": "When enabled, outputs detailed token counting logs to the LLM Gateway output channel",
+          "description": "%config.enableDebugLogs.description%",
+          "markdownDescription": "%config.enableDebugLogs.markdownDescription%",
           "order": 13
         },
         "github.copilot.llm-gateway.enableTokenUsageHack": {
           "type": "boolean",
           "default": false,
-          "description": "Enable experimental token usage reporting (requires restart)",
-          "markdownDescription": "Experimental: Attempts to force token usage display in Copilot Chat context window. May not work in all VS Code versions.",
+          "description": "%config.enableTokenUsageHack.description%",
+          "markdownDescription": "%config.enableTokenUsageHack.markdownDescription%",
           "order": 14
         }
       }

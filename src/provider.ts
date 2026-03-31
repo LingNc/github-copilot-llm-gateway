@@ -1,8 +1,3 @@
-/**
- * Provider for multi-provider configuration support
- * Each GatewayProvider instance represents a single provider
- */
-
 import * as vscode from 'vscode';
 import type { getEncoding } from 'js-tiktoken';
 import { GatewayClient } from './client';
@@ -15,6 +10,7 @@ import {
 } from './types';
 import { ConfigManager } from './config/ConfigManager';
 import { ResolvedModel, ConfigMode, ProviderNameStyle } from './config/types';
+import { TokenUsageViewProvider } from './views/TokenUsageView';
 
 /**
  * Union type for either client type
@@ -51,6 +47,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   // Current session token statistics
   private currentContextTokens = 0;
   private currentModelMaxTokens = 0;
+  // Token usage view provider
+  private tokenUsageProvider?: TokenUsageViewProvider;
 
   constructor(
     context: vscode.ExtensionContext,
@@ -140,6 +138,11 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       }));
     }
 
+    // Update the view provider
+    if (this.tokenUsageProvider) {
+      this.tokenUsageProvider.updateData(usedTokens, maxTokens, this.tokenDetails);
+    }
+
     this.outputChannel.appendLine(`[Token Statistics] ${usedTokens}/${maxTokens} (${percentage}%)`);
   }
 
@@ -149,96 +152,53 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   private tokenDetails: Array<{ category: string; label: string; tokens: number; percentage: number }> = [];
 
   /**
-   * Show token usage details and compress context
+   * Show token usage details in sidebar view
    */
   public async compressContext(): Promise<void> {
+    // Show the token usage view
+    if (this.tokenUsageProvider) {
+      this.tokenUsageProvider.show();
+    } else {
+      vscode.commands.executeCommand('llmGateway.tokenUsage.focus');
+    }
+
     if (this.currentContextTokens === 0) {
-      vscode.window.showInformationMessage('LLM Gateway: No active session to compress');
+      // No active session, just show empty view
       return;
     }
 
-    const percentage = Math.round((this.currentContextTokens / this.currentModelMaxTokens) * 100);
-    const remainingTokens = this.currentModelMaxTokens - this.currentContextTokens;
+    // Show confirmation dialog
+    const result = await vscode.window.showWarningMessage(
+      vscode.l10n.t('token.compressConfirmMessage', this.currentContextTokens.toLocaleString(), this.currentModelMaxTokens.toLocaleString()),
+      { modal: true },
+      vscode.l10n.t('token.compressButton'),
+      vscode.l10n.t('token.cancelButton')
+    );
 
-    // Create detailed message
-    let detailMessage = `**上下文窗口**\n`;
-    detailMessage += `${(this.currentContextTokens / 1000).toFixed(1)}K/${(this.currentModelMaxTokens / 1000).toFixed(0)}K tokens\n`;
-    detailMessage += `${percentage}% 已使用\n`;
-    detailMessage += `${(remainingTokens / 1000).toFixed(1)}K 保留用于响应\n\n`;
+    if (result === vscode.l10n.t('token.compressButton')) {
+      this.outputChannel.appendLine('[Token Statistics] Context compression requested');
+      await vscode.commands.executeCommand('workbench.action.chat.clear');
+      vscode.window.showInformationMessage(vscode.l10n.t('token.contextCompressed'));
 
-    // Add category breakdown
-    if (this.tokenDetails.length > 0) {
-      // Group by category
-      const byCategory: Record<string, Array<{ label: string; tokens: number; percentage: number }>> = {};
-      for (const detail of this.tokenDetails) {
-        if (!byCategory[detail.category]) {
-          byCategory[detail.category] = [];
-        }
-        byCategory[detail.category].push(detail);
+      // Reset token counts
+      this.currentContextTokens = 0;
+      this.currentSessionPromptTokens = 0;
+      this.currentSessionCompletionTokens = 0;
+      this.tokenDetails = [];
+      this.updateTokenStatusBar(0, this.currentModelMaxTokens, []);
+
+      // Update the view
+      if (this.tokenUsageProvider) {
+        this.tokenUsageProvider.updateData(0, this.currentModelMaxTokens, []);
       }
-
-      for (const [category, items] of Object.entries(byCategory)) {
-        detailMessage += `**${category}**\n`;
-        for (const item of items) {
-          detailMessage += `${item.label}: ${item.percentage}%\n`;
-        }
-        detailMessage += `\n`;
-      }
-    } else {
-      // Default breakdown estimation
-      const systemTokens = Math.round(this.currentContextTokens * 0.13);
-      const toolTokens = Math.round(this.currentContextTokens * 0.15);
-      const messageTokens = Math.round(this.currentContextTokens * 0.72);
-
-      detailMessage += `**System**\n`;
-      detailMessage += `System Instructions: ${Math.round((systemTokens / this.currentContextTokens) * 100)}%\n\n`;
-      detailMessage += `**Tool Definitions**\n`;
-      detailMessage += `Tools: ${Math.round((toolTokens / this.currentContextTokens) * 100)}%\n\n`;
-      detailMessage += `**User Context**\n`;
-      detailMessage += `Messages: ${Math.round((messageTokens / this.currentContextTokens) * 100)}%\n`;
     }
+  }
 
-    // Use QuickPick for better styling
-    const quickPick = vscode.window.createQuickPick();
-    quickPick.title = 'LLM Gateway Token Usage';
-    quickPick.placeholder = 'Token usage details';
-    quickPick.ignoreFocusOut = false;
-
-    // Create items for display
-    const items: vscode.QuickPickItem[] = [
-      { label: detailMessage, kind: vscode.QuickPickItemKind.Separator },
-      { label: '', kind: vscode.QuickPickItemKind.Separator },
-      { label: '$(clear-all) 压缩对话上下文', description: '清除历史消息以减少 token 使用量', alwaysShow: true },
-      { label: '$(close) 关闭', alwaysShow: true }
-    ];
-
-    quickPick.items = items;
-    quickPick.activeItems = [];
-
-    // Handle selection
-    quickPick.onDidAccept(() => {
-      const selected = quickPick.selectedItems[0];
-      if (selected?.label.includes('压缩对话')) {
-        this.outputChannel.appendLine('[Token Statistics] Context compression requested');
-        vscode.commands.executeCommand('workbench.action.chat.clear')
-          .then(() => {
-            vscode.window.showInformationMessage('LLM Gateway: 聊天历史已清除');
-            // Reset token counts
-            this.currentContextTokens = 0;
-            this.currentSessionPromptTokens = 0;
-            this.currentSessionCompletionTokens = 0;
-            this.tokenDetails = [];
-            this.updateTokenStatusBar(0, this.currentModelMaxTokens);
-          });
-      }
-      quickPick.hide();
-    });
-
-    quickPick.onDidHide(() => {
-      quickPick.dispose();
-    });
-
-    quickPick.show();
+  /**
+   * Set the token usage view provider
+   */
+  public setTokenUsageProvider(provider: TokenUsageViewProvider): void {
+    this.tokenUsageProvider = provider;
   }
 
   /**

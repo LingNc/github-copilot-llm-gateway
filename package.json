@@ -82,10 +82,28 @@
         "category": "GitHub Copilot LLM Gateway"
       },
       {
-        "command": "github.copilot.llm-gateway.compressContext",
-        "title": "%command.compressContext.title%",
+        "command": "github.copilot.llm-gateway.showTokenUsage",
+        "title": "%command.showTokenUsage.title%",
         "category": "GitHub Copilot LLM Gateway",
-        "icon": "$(info)"
+        "icon": "$(graph)"
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "type": "webview",
+          "id": "llmGateway.tokenUsage",
+          "name": "%view.tokenUsage.name%",
+          "when": "github.copilot.llm-gateway.tokenStatisticsEnabled",
+          "icon": "$(symbol-keyword)",
+          "contextualTitle": "%view.tokenUsage.contextualTitle%"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "llmGateway.tokenUsage",
+        "contents": "%view.tokenUsage.welcome%"
       }
     ],
     "configuration": {

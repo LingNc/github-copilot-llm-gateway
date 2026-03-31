@@ -104,6 +104,33 @@ npm run package
 
 **优先级**: 低（仅在用户反馈 tiktoken 性能问题时实施）
 
+#### 模型上下文长度显示异常问题排查
+
+**问题描述**: 在 Copilot Chat 模型选择界面中，LLM Gateway 配置的模型上下文长度显示比实际值偏大
+- 示例 1: 实际 1M (1,000,000) → 显示 1.1M
+- 示例 2: 实际 262K (262,144) → 显示 295K
+
+**可能原因**:
+1. **格式转换问题**: `formatNumber()` 函数在处理大数字时可能存在精度问题
+2. **单位换算问题**: K/M 换算逻辑可能有误（1000 vs 1024）
+3. **VS Code 内部处理**: Copilot Chat 可能对模型信息进行了额外的格式化
+4. **配置读取问题**: 模型配置读取时可能发生了数值转换错误
+
+**排查步骤**:
+1. 检查 `src/provider.ts` 中的 `formatNumber()` 方法实现
+2. 添加调试日志输出原始值和格式化后的值
+3. 对比 `provideLanguageModelChatInformation()` 返回的 `model.info` 数据
+4. 检查 `package.json` 中 `languageModelChatProviders` 的模型注册信息
+
+**相关代码位置**:
+- `src/provider.ts`: `formatNumber()` 方法
+- `src/provider.ts`: `provideLanguageModelChatInformation()`
+- `src/manager/ProviderManager.ts`: 模型注册逻辑
+
+**预估工作量**: 1-2 小时
+
+**优先级**: 中（影响用户体验，但不影响功能）
+
 ### 最新进度
 项目已重构为支持多厂商配置系统：
 - 支持配置多个不同 baseURL 的厂商

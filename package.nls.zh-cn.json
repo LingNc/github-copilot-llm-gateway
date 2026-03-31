@@ -26,7 +26,7 @@
   "config.enableDebugLogs.description": "启用详细的 Token 计数调试日志",
   "config.enableDebugLogs.markdownDescription": "启用后，将输出详细的 Token 计数日志到 LLM Gateway 输出通道。默认值：false",
   "config.enableTokenStatistics.description": "启用 Token 使用量统计和状态栏显示",
-  "config.enableTokenStatistics.markdownDescription": "启用后，在状态栏显示当前会话 Token 使用百分比，并允许手动压缩上下文。默认值：false",
+  "config.enableTokenStatistics.markdownDescription": "启用后，在状态栏显示当前会话 Token 使用百分比，并允许手动压缩上下文。默认值：true",
   "config.enableCopilotUsageReport.description": "向 Copilot Chat 上下文窗口报告 Token 使用量（实验性）",
   "config.enableCopilotUsageReport.markdownDescription": "启用后，将 Token 使用量报告给 Copilot Chat 的原生上下文窗口显示。这是实验性功能，可能无法在所有 VS Code 版本中正常工作。默认值：false",
   "command.testConnection.title": "测试服务器连接",

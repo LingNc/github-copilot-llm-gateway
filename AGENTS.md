@@ -159,6 +159,48 @@ npm run package
 
 **优先级**: 低（功能增强，非必要）
 
+#### Token 分类统计完善（Files 和 Tool Results）
+
+**当前状态**:
+已实现 3 个分类：
+- **System**: System Instructions, Tool Definitions
+- **User Context**: Messages
+
+**目标**: 实现与 Copilot Chat 官方一致的 5 个子项分类：
+- **System**: System Instructions, Tool Definitions
+- **User Context**: Messages, **Files**, **Tool Results**
+
+**技术难点**:
+1. **Files 分类**: 需要从消息内容中识别文件附件相关的 Token
+   - 需要解析消息中的文件引用（如 `#file:path/to/file`）
+   - 或者从 VS Code API 获取附件信息
+
+2. **Tool Results 分类**: 需要从消息内容中识别工具返回结果
+   - 需要解析 `LanguageModelToolResultPart` 的内容
+   - 区分普通消息和工具返回结果
+
+**实现思路**:
+1. 在 `convertMessages()` 方法中记录文件和工具结果的相关信息
+2. 修改 `provideLanguageModelResponse` 传递额外的分类数据
+3. 在 `updateTokenStatusBar` 中显示完整的 5 个分类
+
+**参考实现**:
+Copilot Chat 使用 prompt-tsx 的 XML 标签来区分不同类型的内容：
+```typescript
+// Copilot Chat 源码中的分类映射
+attachment: { category: PromptTokenCategory.UserContext, label: PromptTokenLabel.Files },
+file: { category: PromptTokenCategory.UserContext, label: PromptTokenLabel.Files },
+error: { category: PromptTokenCategory.UserContext, label: PromptTokenLabel.ToolResults },
+```
+
+**相关代码位置**:
+- `src/provider.ts`: `convertMessages()` 方法
+- `src/provider.ts`: Token 统计逻辑
+
+**预估工作量**: 3-4 小时
+
+**优先级**: 低（当前 Messages 合计已能满足大部分需求）
+
 ### 最新进度
 项目已重构为支持多厂商配置系统：
 - 支持配置多个不同 baseURL 的厂商

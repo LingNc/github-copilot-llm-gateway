@@ -44,6 +44,8 @@
   "token.tokens": "个令牌",
   "token.used": "已使用",
   "token.remainingForResponse": "保留用于响应",
+  "token.details": "详细信息",
+  "token.clickToCompress": "点击压缩上下文",
   "token.system": "System",
   "token.systemInstructions": "System Instructions",
   "token.toolDefinitions": "Tool Definitions",

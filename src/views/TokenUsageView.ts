@@ -53,7 +53,7 @@ export class TokenUsageViewProvider implements vscode.WebviewViewProvider {
     this._updateView();
   }
 
-  public updateData(usedTokens: number, maxTokens: number, details: TokenDetail[]): void {
+  public updateData(usedTokens: number, maxTokens: number, details: TokenDetail[] = []): void {
     this._currentTokens = usedTokens;
     this._maxTokens = maxTokens;
     this._details = details;
@@ -87,211 +87,190 @@ export class TokenUsageViewProvider implements vscode.WebviewViewProvider {
     // Use a content security policy that allows loading resources from the extension
     const cspSource = webview.cspSource;
 
-    return `<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${cspSource} 'unsafe-inline'; script-src ${cspSource} 'unsafe-inline';">
-    <style>
-        body {
-            font-family: var(--vscode-font-family);
-            font-size: var(--vscode-font-size);
-            color: var(--vscode-foreground);
-            padding: 16px;
-            line-height: 1.4;
-        }
-
-        .header {
-            margin-bottom: 16px;
-            padding-bottom: 12px;
-            border-bottom: 1px solid var(--vscode-panel-border);
-        }
-
-        .title {
-            font-size: 13px;
-            font-weight: 600;
-            color: var(--vscode-foreground);
-            margin-bottom: 8px;
-        }
-
-        .token-count {
-            font-size: 16px;
-            color: var(--vscode-foreground);
-            margin-bottom: 4px;
-        }
-
-        .percentage {
-            font-size: 24px;
-            font-weight: 300;
-            margin: 8px 0;
-        }
-
-        .percentage.high {
-            color: var(--vscode-errorForeground);
-        }
-
-        .percentage.medium {
-            color: var(--vscode-editorWarning-foreground);
-        }
-
-        .percentage.low {
-            color: var(--vscode-gitDecoration-addedResourceForeground);
-        }
-
-        .remaining {
-            font-size: 11px;
-            color: var(--vscode-descriptionForeground);
-        }
-
-        .category {
-            margin-top: 16px;
-        }
-
-        .category-title {
-            font-size: 11px;
-            font-weight: 600;
-            text-transform: uppercase;
-            color: var(--vscode-descriptionForeground);
-            margin-bottom: 8px;
-            letter-spacing: 0.5px;
-        }
-
-        .detail-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 6px 0;
-            border-bottom: 1px solid var(--vscode-panel-border);
-        }
-
-        .detail-item:last-child {
-            border-bottom: none;
-        }
-
-        .detail-label {
-            font-size: 12px;
-            color: var(--vscode-foreground);
-        }
-
-        .detail-percentage {
-            font-size: 12px;
-            color: var(--vscode-descriptionForeground);
-        }
-
-        .compress-button {
-            margin-top: 24px;
-            padding: 8px 16px;
-            background: var(--vscode-button-background);
-            color: var(--vscode-button-foreground);
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 12px;
-            width: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
-        }
-
-        .compress-button:hover {
-            background: var(--vscode-button-hoverBackground);
-        }
-
-        .empty-state {
-            text-align: center;
-            padding: 32px 16px;
-            color: var(--vscode-descriptionForeground);
-            font-size: 12px;
-        }
-    </style>
-</head>
-<body>
-    <div id="content">
-        <div class='empty-state'>No active chat session</div>
-    </div>
-
-    <script>
-        const vscode = acquireVsCodeApi();
-
-        // Handle messages from the extension
-        window.addEventListener('message', event => {
-            const message = event.data;
-
-            if (message.type === 'update') {
-                updateContent(message);
-            }
-        });
-
-        function updateContent(data) {
-            const content = document.getElementById('content');
-
-            if (data.usedTokens === 0) {
-                content.innerHTML = '<div class='empty-state'>No active chat session</div>';
-                return;
-            }
-
-            const percentageClass = data.percentage > 90 ? 'high' : data.percentage > 70 ? 'medium' : 'low';
-
-            let detailsHtml = '';
-            if (data.details && data.details.length > 0) {
-                // Group by category
-                const byCategory = {};
-                for (const detail of data.details) {
-                    if (!byCategory[detail.category]) {
-                        byCategory[detail.category] = [];
-                    }
-                    byCategory[detail.category].push(detail);
-                }
-
-                for (const [category, items] of Object.entries(byCategory)) {
-                    detailsHtml += `<div class='category'>`;
-                    detailsHtml += `<div class='category-title'>${escapeHtml(category)}</div>`;
-                    for (const item of items) {
-                        detailsHtml += `
-                            <div class='detail-item'>
-                                <span class='detail-label'>${escapeHtml(item.label)}</span>
-                                <span class='detail-percentage'>${item.percentage}%</span>
-                            </div>
-                        `;
-                    }
-                    detailsHtml += `</div>`;
-                }
-            }
-
-            content.innerHTML = `
-                <div class='header'>
-                    <div class='title'>Context Window</div>
-                    <div class='token-count'>${formatTokens(data.usedTokens)}/${formatTokens(data.maxTokens)} tokens</div>
-                    <div class='percentage ${percentageClass}'>${data.percentage}%</div>
-                    <div class='remaining'>${formatTokens(data.remaining)} remaining for response</div>
-                </div>
-                ${detailsHtml}
-                <button class='compress-button' onclick='compressContext()'>
-                    <span>Compress Context</span>
-                </button>
-            `;
-        }
-
-        function compressContext() {
-            vscode.postMessage({ type: 'compress' });
-        }
-
-        function formatTokens(tokens) {
-            if (tokens >= 1000) {
-                return (tokens / 1000).toFixed(1) + 'K';
-            }
-            return tokens.toString();
-        }
-
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-    </script>
-</body>
-</html>`;
+    // Use string concatenation to avoid template literal issues with esbuild
+    return [
+      '<!DOCTYPE html>',
+      '<html lang="en">',
+      '<head>',
+      '    <meta charset="UTF-8">',
+      '    <meta name="viewport" content="width=device-width, initial-scale=1.0">',
+      '    <meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src ' + cspSource + ' \'unsafe-inline\'; script-src ' + cspSource + ' \'unsafe-inline\';">',
+      '    <style>',
+      '        body {',
+      '            font-family: var(--vscode-font-family);',
+      '            font-size: var(--vscode-font-size);',
+      '            color: var(--vscode-foreground);',
+      '            padding: 16px;',
+      '            line-height: 1.4;',
+      '        }',
+      '        .header {',
+      '            margin-bottom: 16px;',
+      '            padding-bottom: 12px;',
+      '            border-bottom: 1px solid var(--vscode-panel-border);',
+      '        }',
+      '        .title {',
+      '            font-size: 13px;',
+      '            font-weight: 600;',
+      '            color: var(--vscode-foreground);',
+      '            margin-bottom: 8px;',
+      '        }',
+      '        .token-count {',
+      '            font-size: 16px;',
+      '            color: var(--vscode-foreground);',
+      '            margin-bottom: 4px;',
+      '        }',
+      '        .percentage {',
+      '            font-size: 24px;',
+      '            font-weight: 300;',
+      '            margin: 8px 0;',
+      '        }',
+      '        .percentage.high {',
+      '            color: var(--vscode-errorForeground);',
+      '        }',
+      '        .percentage.medium {',
+      '            color: var(--vscode-editorWarning-foreground);',
+      '        }',
+      '        .percentage.low {',
+      '            color: var(--vscode-gitDecoration-addedResourceForeground);',
+      '        }',
+      '        .remaining {',
+      '            font-size: 11px;',
+      '            color: var(--vscode-descriptionForeground);',
+      '        }',
+      '        .category {',
+      '            margin-top: 16px;',
+      '        }',
+      '        .category-title {',
+      '            font-size: 11px;',
+      '            font-weight: 600;',
+      '            text-transform: uppercase;',
+      '            color: var(--vscode-descriptionForeground);',
+      '            margin-bottom: 8px;',
+      '            letter-spacing: 0.5px;',
+      '        }',
+      '        .detail-item {',
+      '            display: flex;',
+      '            justify-content: space-between;',
+      '            align-items: center;',
+      '            padding: 6px 0;',
+      '            border-bottom: 1px solid var(--vscode-panel-border);',
+      '        }',
+      '        .detail-item:last-child {',
+      '            border-bottom: none;',
+      '        }',
+      '        .detail-label {',
+      '            font-size: 12px;',
+      '            color: var(--vscode-foreground);',
+      '        }',
+      '        .detail-percentage {',
+      '            font-size: 12px;',
+      '            color: var(--vscode-descriptionForeground);',
+      '        }',
+      '        .compress-button {',
+      '            margin-top: 24px;',
+      '            padding: 8px 16px;',
+      '            background: var(--vscode-button-background);',
+      '            color: var(--vscode-button-foreground);',
+      '            border: none;',
+      '            border-radius: 4px;',
+      '            cursor: pointer;',
+      '            font-size: 12px;',
+      '            width: 100%;',
+      '            display: flex;',
+      '            align-items: center;',
+      '            justify-content: center;',
+      '            gap: 6px;',
+      '        }',
+      '        .compress-button:hover {',
+      '            background: var(--vscode-button-hoverBackground);',
+      '        }',
+      '        .empty-state {',
+      '            text-align: center;',
+      '            padding: 32px 16px;',
+      '            color: var(--vscode-descriptionForeground);',
+      '            font-size: 12px;',
+      '        }',
+      '    </style>',
+      '</head>',
+      '<body>',
+      '    <div id="content">',
+      '        <div class="empty-state">No active chat session</div>',
+      '    </div>',
+      '',
+      '    <script>',
+      '        const vscode = acquireVsCodeApi();',
+      '',
+      '        window.addEventListener(\'message\', event => {',
+      '            const message = event.data;',
+      '            if (message.type === \'update\') {',
+      '                updateContent(message);',
+      '            }',
+      '        });',
+      '',
+      '        function updateContent(data) {',
+      '            const content = document.getElementById(\'content\');',
+      '',
+      '            if (data.usedTokens === 0) {',
+      '                content.innerHTML = \'<div class="empty-state">No active chat session</div>\';',
+      '                return;',
+      '            }',
+      '',
+      '            const percentageClass = data.percentage > 90 ? \'high\' : data.percentage > 70 ? \'medium\' : \'low\';',
+      '',
+      '            let detailsHtml = \'\';',
+      '            if (data.details && data.details.length > 0) {',
+      '                const byCategory = {};',
+      '                for (const detail of data.details) {',
+      '                    if (!byCategory[detail.category]) {',
+      '                        byCategory[detail.category] = [];',
+      '                    }',
+      '                    byCategory[detail.category].push(detail);',
+      '                }',
+      '',
+      '                for (const [category, items] of Object.entries(byCategory)) {',
+      '                    detailsHtml += \'<div class="category">\';',
+      '                    detailsHtml += \'<div class="category-title">\' + escapeHtml(category) + \'</div>\';',
+      '                    for (const item of items) {',
+      '                        detailsHtml += \'<div class="detail-item">\';',
+      '                        detailsHtml += \'<span class="detail-label">\' + escapeHtml(item.label) + \'</span>\';',
+      '                        detailsHtml += \'<span class="detail-percentage">\' + item.percentage + \'%</span>\';',
+      '                        detailsHtml += \'</div>\';',
+      '                    }',
+      '                    detailsHtml += \'</div>\';',
+      '                }',
+      '            }',
+      '',
+      '            let html = \'<div class="header">\';',
+      '            html += \'<div class="title">Context Window</div>\';',
+      '            html += \'<div class="token-count">\' + formatTokens(data.usedTokens) + \'/\' + formatTokens(data.maxTokens) + \' tokens</div>\';',
+      '            html += \'<div class="percentage \' + percentageClass + \'">\' + data.percentage + \'%</div>\';',
+      '            html += \'<div class="remaining">\' + formatTokens(data.remaining) + \' remaining for response</div>\';',
+      '            html += \'</div>\';',
+      '            html += detailsHtml;',
+      '            html += \'<button class="compress-button" onclick="compressContext()">Compress Context</button>\';',
+      '',
+      '            content.innerHTML = html;',
+      '        }',
+      '',
+      '        function compressContext() {',
+      '            vscode.postMessage({ type: \'compress\' });',
+      '        }',
+      '',
+      '        function formatTokens(tokens) {',
+      '            if (tokens >= 1000) {',
+      '                return (tokens / 1000).toFixed(1) + \'K\';',
+      '            }',
+      '            return tokens.toString();',
+      '        }',
+      '',
+      '        function escapeHtml(text) {',
+      '            const div = document.createElement(\'div\');',
+      '            div.textContent = text;',
+      '            return div.innerHTML;',
+      '        }',
+      '    </script>',
+      '</body>',
+      '</html>'
+    ].join('\n');
   }
 }

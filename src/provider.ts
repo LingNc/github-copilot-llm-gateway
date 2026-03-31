@@ -1104,6 +1104,11 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     progress: vscode.Progress<vscode.LanguageModelResponsePart>,
     token: vscode.CancellationToken
   ): Promise<void> {
+    // Get configuration for this request
+    const config = vscode.workspace.getConfiguration('github.copilot.llm-gateway');
+    const tokenUsageHackEnabled = config.get<boolean>('enableTokenUsageHack', false);
+    const debugLogsEnabled = config.get<boolean>('enableDebugLogs', false);
+
     this.outputChannel.appendLine(`Sending chat request to model: ${model.id}`);
     this.outputChannel.appendLine(`Tool mode: ${options.toolMode}, Tools: ${options.tools?.length || 0}`);
     this.outputChannel.appendLine(`Message count: ${messages.length}`);
@@ -1170,28 +1175,36 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     // HACK: Attempt to inject usage method into progress object
     // This is a workaround for the VS Code API limitation where external providers
     // cannot access the internal ChatResponseStream.usage() method
-    try {
-      const progressAny = progress as any;
-      if (!progressAny.usage || typeof progressAny.usage !== 'function') {
-        // Try to find the internal _progress or stream object
-        const target = progressAny._progress || progressAny;
-        if (target && typeof target === 'object') {
-          // Inject usage method that will be called when we report token usage
-          Object.defineProperty(target, 'usage', {
-            value: (usage: { promptTokens: number; completionTokens: number; outputBuffer?: number }) => {
-              this.outputChannel.appendLine(`[HACK] usage() called with: ${JSON.stringify(usage)}`);
-              // Store for later retrieval
-              this.currentSessionPromptTokens = usage.promptTokens;
-              this.currentSessionCompletionTokens = usage.completionTokens;
-            },
-            writable: true,
-            configurable: true
-          });
-          this.outputChannel.appendLine('[HACK] Successfully injected usage method into progress object');
+    if (tokenUsageHackEnabled) {
+      try {
+        const progressAny = progress as any;
+        if (!progressAny.usage || typeof progressAny.usage !== 'function') {
+          // Try to find the internal _progress or stream object
+          const target = progressAny._progress || progressAny;
+          if (target && typeof target === 'object') {
+            // Inject usage method that will be called when we report token usage
+            Object.defineProperty(target, 'usage', {
+              value: (usage: { promptTokens: number; completionTokens: number; outputBuffer?: number }) => {
+                if (debugLogsEnabled) {
+                  this.outputChannel.appendLine(`[HACK] usage() called with: ${JSON.stringify(usage)}`);
+                }
+                // Store for later retrieval
+                this.currentSessionPromptTokens = usage.promptTokens;
+                this.currentSessionCompletionTokens = usage.completionTokens;
+              },
+              writable: true,
+              configurable: true
+            });
+            if (debugLogsEnabled) {
+              this.outputChannel.appendLine('[HACK] Successfully injected usage method into progress object');
+            }
+          }
+        }
+      } catch (e) {
+        if (debugLogsEnabled) {
+          this.outputChannel.appendLine(`[HACK] Failed to inject usage method: ${e}`);
         }
       }
-    } catch (e) {
-      this.outputChannel.appendLine(`[HACK] Failed to inject usage method: ${e}`);
     }
 
     // Build request

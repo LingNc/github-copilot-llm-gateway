@@ -85,7 +85,7 @@
         "command": "github.copilot.llm-gateway.compressContext",
         "title": "%command.compressContext.title%",
         "category": "GitHub Copilot LLM Gateway",
-        "icon": "$(compress)"
+        "icon": "$(info)"
       }
     ],
     "configuration": {

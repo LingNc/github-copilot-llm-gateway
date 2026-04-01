@@ -120,16 +120,22 @@ export interface ModelModalities {
 }
 
 /**
- * Thinking/ReasOning configuration
+ * Thinking/Reasoning configuration
  */
 export interface ThinkingOptions {
   type: 'enabled' | 'disabled';
   budgetTokens?: number;
   /**
-   * Reasoning effort level for models that support it (e.g., Claude, o1/o3, Kimi, Qwen)
+   * Default reasoning effort level
    * Values: 'low', 'medium', 'high'
    */
   effort?: 'low' | 'medium' | 'high';
+  /**
+   * Available thinking effort levels for model picker dropdown
+   * If not specified, defaults to ['low', 'medium', 'high']
+   * Example: ['low', 'high'] for models that only support two levels
+   */
+  levels?: ('low' | 'medium' | 'high')[];
 }
 
 /**

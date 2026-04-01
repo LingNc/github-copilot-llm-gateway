@@ -131,12 +131,95 @@ Open `settings.json` (`Ctrl+Shift+P` → "Preferences: Open User Settings (JSON)
           }
         }
       }
+    },
+    "anthropic": {
+      "name": "Anthropic",
+      "baseURL": "https://api.anthropic.com/v1",
+      "apiKey": "YOUR_API_KEY",
+      "apiFormat": "anthropic",
+      "models": {
+        "claude-3-7-sonnet-20250219": {
+          "name": "Claude 3.7 Sonnet",
+          "limit": {
+            "context": 200000,
+            "output": 8192
+          },
+          "options": {
+            "thinking": {
+              "type": "enabled",
+              "budgetTokens": 16000,
+              "effort": "high",
+              "levels": ["low", "medium", "high"]
+            }
+          },
+          "capabilities": {
+            "toolCalling": true,
+            "vision": true
+          }
+        }
+      }
+    },
+    "openai": {
+      "name": "OpenAI",
+      "baseURL": "https://api.openai.com/v1",
+      "apiKey": "YOUR_API_KEY",
+      "apiFormat": "openai",
+      "models": {
+        "o3-mini": {
+          "name": "o3-mini",
+          "limit": {
+            "context": 128000,
+            "output": 32768
+          },
+          "options": {
+            "thinking": {
+              "type": "enabled",
+              "effort": "medium",
+              "levels": ["low", "medium", "high"]
+            }
+          },
+          "capabilities": {
+            "toolCalling": true,
+            "vision": true
+          }
+        }
+      }
+    },
+    "deepseek": {
+      "name": "DeepSeek",
+      "baseURL": "https://api.deepseek.com/v1",
+      "apiKey": "YOUR_API_KEY",
+      "apiFormat": "openai",
+      "models": {
+        "deepseek-reasoner": {
+          "name": "DeepSeek Reasoner",
+          "limit": {
+            "context": 64000,
+            "output": 8192
+          },
+          "options": {
+            "thinking": {
+              "type": "enabled"
+            }
+          },
+          "capabilities": {
+            "toolCalling": true,
+            "vision": false
+          }
+        }
+      }
     }
   },
   "github.copilot.llm-gateway.showProviderPrefix": false,
   "github.copilot.llm-gateway.configMode": "config-priority"
 }
 ```
+
+**Thinking Mode Examples:**
+
+- **Claude 3.7** with thinking levels dropdown: Configure `levels: ["low", "medium", "high"]` to show dropdown in model picker
+- **o3-mini** with reasoning effort: Same dropdown configuration
+- **DeepSeek Reasoner** with thinking only: Just `"type": "enabled"`, no dropdown shown
 
 **Configuration modes:**
 - `config-only` - Only use configured models (for APIs without `/v1/models`)
@@ -198,6 +281,43 @@ Your self-hosted models now appear in Copilot Chat. Select one and start coding 
 | `limit.output` | number | Maximum output tokens |
 | `capabilities.toolCalling` | boolean | Enable tool calling |
 | `capabilities.vision` | boolean | Enable vision support |
+| `options.thinking` | object | Thinking mode configuration (see below) |
+
+### Thinking Configuration
+
+For models that support reasoning/thinking (Claude 3.7, o1/o3, Kimi, Qwen, DeepSeek):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | `'enabled' \| 'disabled'` | Enable thinking mode |
+| `budgetTokens` | number | Thinking token budget (Anthropic/Claude uses this) |
+| `effort` | `'low' \| 'medium' \| 'high'` | Default thinking effort level |
+| `levels` | `string[]` | Available effort levels for dropdown, e.g., `["low", "medium", "high"]` |
+
+**Example - Model with thinking levels dropdown:**
+```json
+"options": {
+  "thinking": {
+    "type": "enabled",
+    "budgetTokens": 16000,
+    "effort": "high",
+    "levels": ["low", "medium", "high"]
+  }
+}
+```
+
+**Example - Model with thinking mode only (no levels):**
+```json
+"options": {
+  "thinking": {
+    "type": "enabled"
+  }
+}
+```
+
+- When `levels` is configured: VS Code model picker shows "Thinking Effort" dropdown
+- When `type: "enabled"` without `levels`: Thinking is enabled but no dropdown shown
+- When no `thinking` config: Thinking is disabled
 
 ### Global Settings
 
@@ -209,6 +329,9 @@ Your self-hosted models now appear in Copilot Chat. Select one and start coding 
 | `requestTimeout` | number | `60000` | Request timeout in ms |
 | `parallelToolCalling` | boolean | `true` | Allow parallel tool calls |
 | `agentTemperature` | number | `0.0` | Temperature for tool mode |
+| `enableTokenStatistics` | boolean | `true` | Show token usage in status bar |
+| `enableDebugLogs` | boolean | `false` | Enable general debug logs |
+| `enableTokenDebugLogs` | boolean | `false` | Enable detailed token counting logs |
 
 ## Commands
 

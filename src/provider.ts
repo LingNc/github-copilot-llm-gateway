@@ -927,41 +927,54 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   /**
    * Build configuration schema for model picker (e.g., thinking effort selector)
    * Reference: Copilot Chat's buildConfigurationSchema implementation
+   *
+   * Logic:
+   * - If thinking.type !== 'enabled': no thinking configuration shown
+   * - If thinking.levels is defined: show dropdown with specified levels
+   * - If thinking.type === 'enabled' but no levels: enable thinking without dropdown
    */
   private buildConfigurationSchema(
     model: ResolvedModel
   ): vscode.LanguageModelConfigurationSchema | undefined {
-    // Check if model supports thinking/reasoning (type: 'enabled')
-    if (!model.options?.thinking || model.options.thinking.type !== 'enabled') {
+    const thinking = model.options?.thinking;
+
+    // If thinking is not enabled, return undefined
+    if (!thinking || thinking.type !== 'enabled') {
       return undefined;
     }
 
-    // Define effort levels
-    const effortLevels = ['low', 'medium', 'high'];
+    // If levels is specified, show dropdown in model picker
+    if (thinking.levels && thinking.levels.length > 0) {
+      const effortLevels = thinking.levels;
+      const defaultEffort = thinking.effort && effortLevels.includes(thinking.effort)
+        ? thinking.effort
+        : effortLevels[0];
 
-    // Use configured effort as default, or 'medium' if not specified
-    const defaultEffort = model.options.thinking.effort || 'medium';
+      // Filter descriptions based on available levels
+      const levelDescriptions: Record<string, string> = {
+        low: vscode.l10n.t('Faster responses with less reasoning'),
+        medium: vscode.l10n.t('Balanced reasoning and speed'),
+        high: vscode.l10n.t('Maximum reasoning depth'),
+      };
 
-    return {
-      properties: {
-        reasoningEffort: {
-          type: 'string',
-          title: vscode.l10n.t('Thinking Effort'),
-          enum: effortLevels,
-          enumItemLabels: effortLevels.map(level => level.charAt(0).toUpperCase() + level.slice(1)),
-          enumDescriptions: effortLevels.map(level => {
-            switch (level) {
-              case 'low': return vscode.l10n.t('Faster responses with less reasoning');
-              case 'medium': return vscode.l10n.t('Balanced reasoning and speed');
-              case 'high': return vscode.l10n.t('Maximum reasoning depth');
-              default: return level;
-            }
-          }),
-          default: defaultEffort,
-          group: 'navigation',
+      return {
+        properties: {
+          reasoningEffort: {
+            type: 'string',
+            title: vscode.l10n.t('Thinking Effort'),
+            enum: effortLevels,
+            enumItemLabels: effortLevels.map(level => level.charAt(0).toUpperCase() + level.slice(1)),
+            enumDescriptions: effortLevels.map(level => levelDescriptions[level] || level),
+            default: defaultEffort,
+            group: 'navigation',
+          }
         }
-      }
-    };
+      };
+    }
+
+    // If no levels specified but thinking is enabled, no dropdown is shown
+    // The model will use default thinking behavior
+    return undefined;
   }
 
   /**
@@ -1583,27 +1596,45 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     if (resolvedModel?.options?.thinking && resolvedModel.options.thinking.type === 'enabled') {
       const thinking = resolvedModel.options.thinking;
 
-      // Get user-selected effort from model configuration, fallback to config default
+      // Get user-selected effort from model configuration
+      // If user selected from dropdown, use that value
+      // Otherwise, use config default (effort) or first available level
       const userSelectedEffort = (options as unknown as Record<string, unknown>)?.modelConfiguration?.reasoningEffort;
-      const effectiveEffort = typeof userSelectedEffort === 'string' ? userSelectedEffort : thinking.effort;
+      const configEffort = thinking.effort;
+      const availableLevels = thinking.levels;
+
+      // Determine effective effort:
+      // 1. User selected from dropdown (highest priority)
+      // 2. Configured effort value
+      // 3. First available level (if levels configured)
+      // 4. undefined (use API default)
+      let effectiveEffort: string | undefined;
+      if (typeof userSelectedEffort === 'string') {
+        effectiveEffort = userSelectedEffort;
+      } else if (configEffort) {
+        effectiveEffort = configEffort;
+      } else if (availableLevels && availableLevels.length > 0) {
+        effectiveEffort = availableLevels[0];
+      }
 
       // Handle different API formats for thinking configuration
       if (isAnthropic) {
         // Anthropic format: { type: 'enabled', budget_tokens: number }
-        requestOptions.thinking = {
-          type: thinking.type,
-          budget_tokens: thinking.budgetTokens,
-        };
+        // Only send thinking object if budgetTokens is specified
+        if (thinking.budgetTokens) {
+          requestOptions.thinking = {
+            type: thinking.type,
+            budget_tokens: thinking.budgetTokens,
+          };
+        }
       } else {
         // OpenAI-compatible format
         // For o1/o3 models: reasoning_effort field
-        // For other models: thinking object
         if (effectiveEffort) {
           requestOptions.reasoning_effort = effectiveEffort;
         }
 
-        // Some APIs (like Kimi/Qwen) may use different parameter names
-        // Add thinking object with budget_tokens if specified
+        // Some APIs may use thinking object
         if (thinking.budgetTokens) {
           requestOptions.thinking = {
             type: thinking.type,
@@ -1614,8 +1645,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
       this.outputChannel.appendLine(
         `Thinking configured: type=${thinking.type}, ` +
-        `${effectiveEffort ? `effort=${effectiveEffort}${userSelectedEffort ? ' (user selected)' : ' (config default)'}, ` : ''}` +
-        `${thinking.budgetTokens ? `budgetTokens=${thinking.budgetTokens}` : 'budgetTokens=default'}`
+        `${effectiveEffort ? `effort=${effectiveEffort}${userSelectedEffort ? ' (user selected)' : ' (config default)'}, ` : 'effort=API default, '}` +
+        `${thinking.budgetTokens ? `budgetTokens=${thinking.budgetTokens}` : 'budgetTokens=API default'}`
       );
     }
 

@@ -339,28 +339,37 @@ OpenAI/Anthropic Compatible Server (vLLM/Ollama/Anthropic/etc)
 
 ### thinking 配置说明
 
-支持思考能力的模型（如 Claude 3.7, o1/o3, Kimi, Qwen）可以配置思考深度：
+支持思考能力的模型（如 Claude 3.7, o1/o3, Kimi, Qwen, DeepSeek）可以配置思考模式：
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `type` | `'enabled' \| 'disabled'` | 是否启用思考（必须） |
-| `budgetTokens` | `number` | 思考预算 token 数（可选） |
+| `budgetTokens` | `number` | 思考预算 token 数（可选，Anthropic 专用） |
 | `effort` | `'low' \| 'medium' \| 'high'` | 默认思考等级（可选） |
+| `levels` | `('low' \| 'medium' \| 'high')[]` | 可选思考等级列表（可选） |
 
-**模型选择器配置**: 当 `type: 'enabled'` 时，VS Code 模型选择器会显示"Thinking Effort"下拉菜单，用户可以在聊天时动态选择思考等级。
+**模型选择器下拉菜单逻辑**:
+- **`type: 'enabled'` + `levels` 配置**: 在 VS Code 模型选择器显示"Thinking Effort"下拉菜单，用户可实时选择
+- **`type: 'enabled'` 无 `levels`**: 启用思考但不显示下拉菜单（适用于无分级思考的模型，如 DeepSeek）
+- **无 `thinking` 配置**: 不显示任何思考相关选项
 
-**effort 等级说明**:
-- `low`: 更快的响应，较少的思考
-- `medium`: 平衡的思考深度和速度（默认）
-- `high`: 最大思考深度，适合复杂任务
-
-**配置示例**:
+**配置示例 - 支持分级的模型（Claude 3.7, o1/o3）**:
 ```json
 "options": {
   "thinking": {
     "type": "enabled",
     "budgetTokens": 16000,
-    "effort": "high"
+    "effort": "high",
+    "levels": ["low", "medium", "high"]
+  }
+}
+```
+
+**配置示例 - 仅支持思考模式无分级（DeepSeek）**:
+```json
+"options": {
+  "thinking": {
+    "type": "enabled"
   }
 }
 ```
@@ -368,7 +377,7 @@ OpenAI/Anthropic Compatible Server (vLLM/Ollama/Anthropic/etc)
 **不同 API 格式的处理**:
 - **Anthropic**: 使用 `thinking` 对象（含 `budget_tokens`）
 - **OpenAI (o1/o3)**: 使用 `reasoning_effort` 字段
-- **Kimi/Qwen**: 根据 API 格式自动适配
+- **Kimi/Qwen/DeepSeek**: 根据 API 格式自动适配
 
 ### apiFormat 说明
 

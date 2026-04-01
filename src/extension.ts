@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { ProviderManager } from './manager';
 import { ConfigManager } from './config/ConfigManager';
 import { registerConfigCommands } from './commands';
+import { TokenUsageViewProvider } from './views/TokenUsageView';
 
 /**
  * Extension activation
@@ -17,6 +18,18 @@ export async function activate(context: vscode.ExtensionContext) {
 
   // Initialize and register all providers
   await providerManager.initialize();
+
+  // Create and register token usage view provider
+  const tokenUsageProvider = new TokenUsageViewProvider(context.extensionUri);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      TokenUsageViewProvider.viewType,
+      tokenUsageProvider
+    )
+  );
+
+  // Pass token usage provider to provider manager
+  providerManager.setTokenUsageProvider(tokenUsageProvider);
 
   // Store for disposal
   context.subscriptions.push({
@@ -100,6 +113,20 @@ function registerCommands(
 
   // Register config management commands
   registerConfigCommands(context, configManager);
+
+  // Compact context command
+  const compactContextCommand = vscode.commands.registerCommand(
+    'github.copilot.llm-gateway.compactContext',
+    async () => {
+      const provider = providerManager.getProvider();
+      if (provider) {
+        await provider.compactContext();
+      } else {
+        vscode.window.showErrorMessage('LLM Gateway: Provider not initialized.');
+      }
+    }
+  );
+  context.subscriptions.push(compactContextCommand);
 
   outputChannel.appendLine(`Registered commands`);
 }

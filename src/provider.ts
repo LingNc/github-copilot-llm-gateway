@@ -203,36 +203,36 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       }
     }
 
-    tooltip.appendMarkdown(`### ${this.getLocalizedString('token.contextWindow')}\n\n`);
+    tooltip.appendMarkdown(`### ${this.getLocalizedString('token.contextWindow')}<br><br>`);
 
     const tokenText = `${this.formatNumber(usedTokens)}/${this.formatNumber(maxTokens)} ${this.getLocalizedString('token.tokens')}`;
     const percentageText = `${percentage}%`;
-    tooltip.appendMarkdown(`${tokenText}  **${percentageText}**\n\n`);
+    tooltip.appendMarkdown(`${tokenText}  **${percentageText}**<br><br>`);
 
     const filled = Math.round((percentage / 100) * 20);
     const empty = 20 - filled;
     // Use VS Code theme blue color for the progress bar
     const barFilled = '█'.repeat(filled);
     const barEmpty = '▒'.repeat(empty);
-    tooltip.appendMarkdown(`<span style="color:var(--vscode-charts-blue)">${barFilled}</span><span style="color:var(--vscode-descriptionForeground)">${barEmpty}</span>\n\n`);
+    tooltip.appendMarkdown(`<span style="color:var(--vscode-charts-blue)">${barFilled}</span><span style="color:var(--vscode-descriptionForeground)">${barEmpty}</span><br><br>`);
 
     // Show reserved tokens for response (similar to Copilot Chat)
     const reservedPercentage = Math.round((reservedTokens / maxTokens) * 100);
-    tooltip.appendMarkdown(`${this.formatNumber(reservedTokens)} ${this.getLocalizedString('token.remainingForResponse')} (${reservedPercentage}%)\n\n`);
-    tooltip.appendMarkdown(`---\n\n`);
+    tooltip.appendMarkdown(`${this.formatNumber(reservedTokens)} ${this.getLocalizedString('token.remainingForResponse')} (${reservedPercentage}%)<br><br>`);
+    tooltip.appendMarkdown(`---<br><br>`);
 
     if (systemItems.length > 0) {
-      tooltip.appendMarkdown(`**${this.getLocalizedString('token.system').toUpperCase()}**\n\n`);
+      tooltip.appendMarkdown(`**${this.getLocalizedString('token.system').toUpperCase()}**<br><br>`);
       for (const item of systemItems) {
         const label = item.label.length > 26 ? item.label.substring(0, 23) + '...' : item.label;
         const usedPercentage = usedTokens > 0 ? Math.round((item.percentage / 100) * (usedTokens / maxTokens) * 100) : 0;
-        tooltip.appendMarkdown(`${label.padEnd(25)} ${usedPercentage.toString().padStart(3)}%\n`);
+        tooltip.appendMarkdown(`${label.padEnd(25)} ${usedPercentage.toString().padStart(3)}%<br>`);
       }
-      tooltip.appendMarkdown(`\n`);
+      tooltip.appendMarkdown(`<br>`);
     }
 
     if (userContextItems.length > 0) {
-      tooltip.appendMarkdown(`**${this.getLocalizedString('token.userContext').toUpperCase()}**\n\n`);
+      tooltip.appendMarkdown(`**${this.getLocalizedString('token.userContext').toUpperCase()}**<br><br>`);
       // Sort items to ensure consistent order: Messages, Files, Tool Results
       const sortedItems = userContextItems.sort((a, b) => {
         const order = ['Messages', 'Files', 'Tool Results'];
@@ -241,13 +241,13 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       for (const item of sortedItems) {
         const label = item.label.length > 25 ? item.label.substring(0, 22) + '...' : item.label;
         const usedPercentage = usedTokens > 0 ? Math.round((item.percentage / 100) * (usedTokens / maxTokens) * 100) : 0;
-        tooltip.appendMarkdown(`${label.padEnd(25)} ${usedPercentage.toString().padStart(3)}%\n`);
+        tooltip.appendMarkdown(`${label.padEnd(25)} ${usedPercentage.toString().padStart(3)}%<br>`);
       }
-      tooltip.appendMarkdown(`\n`);
+      tooltip.appendMarkdown(`<br>`);
     }
 
-    tooltip.appendMarkdown(`---\n\n`);
-    tooltip.appendMarkdown(`[${this.getLocalizedString('token.compactContext')}](command:github.copilot.llm-gateway.compactContext)\n`);
+    tooltip.appendMarkdown(`---<br><br>`);
+    tooltip.appendMarkdown(`[${this.getLocalizedString('token.compactContext')}](command:github.copilot.llm-gateway.compactContext)`);
 
     this.tokenStatusBarItem.tooltip = tooltip;
     this.tokenStatusBarItem.show();

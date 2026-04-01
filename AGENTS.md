@@ -65,9 +65,17 @@ npm run package
 - [ ] 模型思考等级配置支持（Kimi/Qwen）
 - [ ] 完整测试和 bug 修复
 
+### Token 统计计划（按顺序）
+
+- [x] **计划 1**: Token 分类统计完善（Files 和 Tool Results）
+- [ ] **计划 2**: Token 估算算法优化（precise/fast-estimate/none 模式）
+- [ ] **计划 3**: 切换模型时自动隐藏 Token 状态栏
+- [ ] **计划 4**: 模型上下文长度显示异常问题排查
+- [ ] **计划 5**: 整理上下文按钮样式优化
+
 ### 未来计划（暂不实装）
 
-#### 计划 1: Token 分类统计完善（Files 和 Tool Results）✅ 已完成
+#### 计划 1: Token 分类统计完善（Files 和 Tool Results）
 
 **当前状态**:
 已实现 5 个分类：

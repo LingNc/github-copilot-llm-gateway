@@ -225,10 +225,11 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     if (systemItems.length > 0 || userContextItems.length > 0) {
       tooltip.appendMarkdown(`**${this.getLocalizedString('token.system')}**  \n`);
 
-      // System items
+      // System items - show percentage of total context window
       for (const item of systemItems) {
-        const usedPercentage = usedTokens > 0 ? Math.round((item.percentage / 100) * (usedTokens / maxTokens) * 100) : 0;
-        tooltip.appendMarkdown(`${item.label} ${usedPercentage}%  \n`);
+        // item.percentage is percentage of used tokens, convert to percentage of max context
+        const contextPercentage = Math.round((item.percentage / 100) * (usedTokens / maxTokens) * 100);
+        tooltip.appendMarkdown(`${item.label} ${contextPercentage}%  \n`);
       }
 
       // Empty line between sections
@@ -245,8 +246,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           return order.indexOf(a.label) - order.indexOf(b.label);
         });
         for (const item of sortedItems) {
-          const usedPercentage = usedTokens > 0 ? Math.round((item.percentage / 100) * (usedTokens / maxTokens) * 100) : 0;
-          tooltip.appendMarkdown(`${item.label} ${usedPercentage}%  \n`);
+          const contextPercentage = Math.round((item.percentage / 100) * (usedTokens / maxTokens) * 100);
+          tooltip.appendMarkdown(`${item.label} ${contextPercentage}%  \n`);
         }
       }
 
@@ -1477,6 +1478,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         { category: 'System', label: 'System Instructions', percentage: systemPercentage },
       ];
 
+      this.outputChannel.appendLine(
+        `[Token Statistics Debug] Building details: messagesTokens=${messagesTokens}, filesTokens=${filesTokens}, toolResultsTokens=${toolResultsTokens}, options.tools=${!!options.tools}`
+      );
+
       if (options.tools && toolDefTokens > 0) {
         details.push({ category: 'System', label: 'Tool Definitions', percentage: toolDefPercentage });
       }
@@ -1491,7 +1496,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
       if (toolResultsTokens > 0) {
         details.push({ category: 'User Context', label: 'Tool Results', percentage: toolResultsPercentage });
+        this.outputChannel.appendLine(`[Token Statistics Debug] Added Tool Results: ${toolResultsTokens} tokens, ${toolResultsPercentage}%`);
       }
+
+      this.outputChannel.appendLine(`[Token Statistics Debug] Total details items: ${details.length}`);
 
       this.updateTokenStatusBar(totalTokens, modelMaxContext, reservedOutputTokens, details);
     }

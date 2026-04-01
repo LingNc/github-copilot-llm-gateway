@@ -93,7 +93,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         vscode.StatusBarAlignment.Right,
         100
       );
-      this.tokenStatusBarItem.command = 'github.copilot.llm-gateway.showTokenUsage';
+      // Click has visual feedback but tooltip immediately reappears
+      // This mimics Copilot Chat's behavior where clicking doesn't disrupt the UX
+      this.tokenStatusBarItem.command = 'github.copilot.llm-gateway.statusBarNoOp';
       context.subscriptions.push(this.tokenStatusBarItem);
       this.updateStatusBarVisibility();
     }
@@ -178,13 +180,18 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     const percentage = Math.round((usedTokens / maxTokens) * 100);
     // Status bar color: green (safe), yellow (warning), red (critical)
-    let color: vscode.ThemeColor | undefined;
+    // MODIFY HERE: Change these colors as needed
+    let color: string | vscode.ThemeColor | undefined;
     if (percentage > 90) {
-      color = new vscode.ThemeColor('statusBarItem.errorForeground');
+      // HIGH USAGE: Red color - modify this hex color if needed
+      color = '#f44336';
     } else if (percentage > 70) {
-      color = new vscode.ThemeColor('statusBarItem.warningForeground');
+      // MEDIUM USAGE: Yellow/Orange color - modify this hex color if needed
+      color = '#ff9800';
+    } else {
+      // LOW USAGE: Green color - modify this hex color if needed
+      color = '#6bcf7f';
     }
-    // For safe usage (<70%), use default foreground color
 
     this.tokenStatusBarItem.text = `$(symbol-keyword) ${percentage}%`;
     this.tokenStatusBarItem.color = color;
@@ -295,61 +302,16 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
   /**
    * Show token usage information when clicking status bar
+   * Opens the Token Usage view panel
    */
   public async showTokenUsage(): Promise<void> {
     if (this.currentContextTokens === 0) {
-      vscode.window.showInformationMessage(vscode.l10n.t('token.noActiveSession'));
+      vscode.window.showInformationMessage('No active session');
       return;
     }
 
-    // Build detailed message
-    const percentage = Math.round((this.currentContextTokens / this.currentModelMaxTokens) * 100);
-    const lines: string[] = [];
-    lines.push(`### ${vscode.l10n.t('token.contextWindow')}`);
-    lines.push('');
-    lines.push(`${this.formatNumber(this.currentContextTokens)}/${this.formatNumber(this.currentModelMaxTokens)} ${vscode.l10n.t('token.tokens')} (${percentage}%)`);
-    lines.push('');
-
-    // Add category details if available
-    if (this.currentTokenDetails && this.currentTokenDetails.length > 0) {
-      lines.push('---');
-      lines.push('');
-
-      const systemItems = this.currentTokenDetails.filter(d => d.category.toLowerCase().includes('system'));
-      const userItems = this.currentTokenDetails.filter(d => d.category.toLowerCase().includes('user'));
-
-      if (systemItems.length > 0) {
-        lines.push(`**${vscode.l10n.t('token.system')}**`);
-        for (const item of systemItems) {
-          lines.push(`- ${item.label}: ${item.percentage}%`);
-        }
-        lines.push('');
-      }
-
-      if (userItems.length > 0) {
-        lines.push(`**${vscode.l10n.t('token.userContext')}**`);
-        for (const item of userItems) {
-          lines.push(`- ${item.label}: ${item.percentage}%`);
-        }
-        lines.push('');
-      }
-    }
-
-    lines.push('---');
-    lines.push('');
-    lines.push(`[${vscode.l10n.t('token.compactContext')}](command:github.copilot.llm-gateway.compactContext)`);
-
-    // Show in information message with markdown
-    const message = lines.join('\n');
-    const selection = await vscode.window.showInformationMessage(
-      message,
-      { modal: false },
-      vscode.l10n.t('token.compactContext')
-    );
-
-    if (selection === vscode.l10n.t('token.compactContext')) {
-      await this.compactContext();
-    }
+    // Focus the token usage view
+    await vscode.commands.executeCommand('llmGateway.tokenUsage.focus');
   }
 
   /**

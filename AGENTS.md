@@ -67,47 +67,21 @@ npm run package
 
 ### 未来计划（暂不实装）
 
-#### 计划 1: Token 分类统计完善（Files 和 Tool Results）
+#### 计划 1: Token 分类统计完善（Files 和 Tool Results）✅ 已完成
 
 **当前状态**:
-已实现 3 个分类：
+已实现 5 个分类：
 - **System**: System Instructions, Tool Definitions
-- **User Context**: Messages
+- **User Context**: Messages, Files, Tool Results
 
-**目标**: 实现与 Copilot Chat 官方一致的 5 个子项分类：
-- **System**: System Instructions, Tool Definitions
-- **User Context**: Messages, **Files**, **Tool Results**
-
-**技术难点**:
-1. **Files 分类**: 需要从消息内容中识别文件附件相关的 Token
-   - 需要解析消息中的文件引用（如 `#file:path/to/file`）
-   - 或者从 VS Code API 获取附件信息
-
-2. **Tool Results 分类**: 需要从消息内容中识别工具返回结果
-   - 需要解析 `LanguageModelToolResultPart` 的内容
-   - 区分普通消息和工具返回结果
-
-**实现思路**:
-1. 在 `convertMessages()` 方法中记录文件和工具结果的相关信息
-2. 修改 `provideLanguageModelResponse` 传递额外的分类数据
-3. 在 `updateTokenStatusBar` 中显示完整的 5 个分类
-
-**参考实现**:
-Copilot Chat 使用 prompt-tsx 的 XML 标签来区分不同类型的内容：
-```typescript
-// Copilot Chat 源码中的分类映射
-attachment: { category: PromptTokenCategory.UserContext, label: PromptTokenLabel.Files },
-file: { category: PromptTokenCategory.UserContext, label: PromptTokenLabel.Files },
-error: { category: PromptTokenCategory.UserContext, label: PromptTokenLabel.ToolResults },
-```
+**实现内容**:
+1. ✅ Files 分类: 通过 `LanguageModelDataPart` 识别图片附件
+2. ✅ Tool Results 分类: 通过 `LanguageModelToolResultPart` 识别工具返回结果
+3. ✅ Tooltip 显示优化: 垂直列表形式，与 Copilot Chat 一致
 
 **相关代码位置**:
-- `src/provider.ts`: `convertMessages()` 方法
-- `src/provider.ts`: Token 统计逻辑
-
-**预估工作量**: 3-4 小时
-
-**优先级**: 高（完善 Token 统计功能）
+- `src/provider.ts`: `convertMessagesWithCategories()` 方法
+- `src/provider.ts`: `updateTokenStatusBar()` 方法
 
 ---
 
@@ -206,6 +180,39 @@ error: { category: PromptTokenCategory.UserContext, label: PromptTokenLabel.Tool
 **预估工作量**: 1-2 小时
 
 **优先级**: 中（影响用户体验，但不影响功能）
+
+---
+
+#### 计划 5: 整理上下文按钮样式优化
+
+**当前状态**:
+当前 tooltip 底部的"整理对话上下文"显示为 Markdown 超链接 `[整理对话上下文](command:...)`
+
+**目标**: 改为 Copilot Chat 风格的按钮样式
+
+**Copilot Chat 实现方式**:
+使用 VS Code 的按钮控件而不是 Markdown 链接
+
+**实现思路**:
+1. 在 tooltip 中使用 HTML button 元素（如果支持）
+2. 或者使用 `MarkdownString` 的 `isTrusted` 和命令链接，配合样式使其看起来像按钮
+3. 参考 Copilot Chat 源码中的实现方式
+
+**参考样式**:
+```
+┌─────────────────────┐
+│  整理对话上下文     │  ← 按钮样式，居中显示，有背景色
+└─────────────────────┘
+```
+
+**相关代码位置**:
+- `src/provider.ts`: `updateTokenStatusBar()` 方法中的 tooltip 构建
+
+**预估工作量**: 1-2 小时
+
+**优先级**: 低（UI 美化）
+
+---
 
 ### 最新进度
 项目已重构为支持多厂商配置系统：

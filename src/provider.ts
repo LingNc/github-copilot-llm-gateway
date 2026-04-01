@@ -1563,22 +1563,16 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       this.outputChannel.appendLine(`  Message ${i + 1}: role=${msg.role}, hasContent=${!!msg.content}, hasToolCalls=${!!msg.tool_calls}, toolCallId=${toolCallId}`);
     }
 
-    // Calculate token limits and truncate
+    // Calculate token limits (for display only, don't truncate - Copilot Chat manages context)
     const modelMaxContext = resolvedModel?.limit.context ?? this.gatewayConfig.defaultMaxTokens;
     const desiredOutputTokens = Math.min(
       resolvedModel?.limit.output ?? this.gatewayConfig.defaultMaxOutputTokens,
       Math.floor(modelMaxContext / 2)
     );
     const toolsTokenEstimate = options.tools ? await this.provideTokenCount(model, this.safeStringify(options.tools), token) : 0;
-    const maxInputTokens = modelMaxContext - desiredOutputTokens - toolsTokenEstimate - 256;
 
-    const truncatedMessages = this.truncateMessagesToFit(openAIMessages, maxInputTokens);
-    if (truncatedMessages.length < openAIMessages.length) {
-      this.outputChannel.appendLine(`WARNING: Truncated conversation from ${openAIMessages.length} to ${truncatedMessages.length} messages to fit context limit`);
-    }
-
-    // Build input text for token estimation
-    const inputText = truncatedMessages
+    // Build input text for token estimation using full messages (Copilot Chat manages context)
+    const inputText = openAIMessages
       .map((m) => {
         let text = typeof m.content === 'string' ? m.content : this.safeStringify(m.content || '');
         if (m.tool_calls) { text += this.safeStringify(m.tool_calls); }
@@ -1658,7 +1652,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     const requestOptions: Record<string, unknown> = {
       model: model.id,
-      messages: truncatedMessages,
+      messages: openAIMessages,
       max_tokens: safeMaxOutputTokens,
     };
 

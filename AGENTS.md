@@ -343,14 +343,27 @@ OpenAI/Anthropic Compatible Server (vLLM/Ollama/Anthropic/etc)
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `type` | `'enabled' \| 'disabled'` | 是否启用思考 |
+| `type` | `'enabled' \| 'disabled'` | 是否启用思考（必须） |
 | `budgetTokens` | `number` | 思考预算 token 数（可选） |
-| `effort` | `'low' \| 'medium' \| 'high'` | 思考深度等级（可选） |
+| `effort` | `'low' \| 'medium' \| 'high'` | 默认思考等级（可选） |
+
+**模型选择器配置**: 当 `type: 'enabled'` 时，VS Code 模型选择器会显示"Thinking Effort"下拉菜单，用户可以在聊天时动态选择思考等级。
 
 **effort 等级说明**:
 - `low`: 更快的响应，较少的思考
 - `medium`: 平衡的思考深度和速度（默认）
 - `high`: 最大思考深度，适合复杂任务
+
+**配置示例**:
+```json
+"options": {
+  "thinking": {
+    "type": "enabled",
+    "budgetTokens": 16000,
+    "effort": "high"
+  }
+}
+```
 
 **不同 API 格式的处理**:
 - **Anthropic**: 使用 `thinking` 对象（含 `budget_tokens`）

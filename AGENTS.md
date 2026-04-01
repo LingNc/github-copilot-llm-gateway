@@ -429,6 +429,68 @@ OpenAI/Anthropic Compatible Server (vLLM/Ollama/Anthropic/etc)
 🛠️ src/provider.ts -> 修复栈溢出问题
 ```
 
+---
+
+### 发布规范
+
+当 develop 上累积了足够的更新，合并到 main（排除 AGENTS.md 等开发文档），打标签，完成一个版本的发布。
+
+**版本号规范**：`v主版本.次版本.修订版本`，例如 `v1.1.3`
+- 主版本：重大架构变更
+- 次版本：新功能添加
+- 修订版本：bug 修复或小改进
+
+```bash
+# 1. 切换到 main 分支
+git checkout main
+
+# 2. 合并 develop，但强制生成合并节点 (--no-ff)，且暂停提交 (--no-commit)
+# --no-ff: 即使可以快进，也强制生成一个 commit 节点，确保 main 上有一个独立的版本点
+# --no-commit: 合并后暂不生成 commit，给你机会去删除不需要的文件
+git merge --no-ff --no-commit develop
+
+# 3. 排除不需要发布的文件
+# AGENTS.md 是开发文档，不发布到 main
+git reset HEAD AGENTS.md 2>/dev/null || true
+rm -f AGENTS.md
+
+# 4. 提交合并，生成版本节点
+# 提交信息格式：release: vx.x.x 简要描述
+git commit -m "release: vx.x.x 简要描述"
+
+# 5. 打标签
+# 标签信息格式：vx.x.x -> 简要描述
+git tag -a vx.x.x -m "vx.x.x -> 简要描述"
+
+# 6. 推送
+git push origin main --tags
+
+# 7. 构建并发布 Release
+# 构建项目
+npm run package
+
+# 创建 GitHub Release
+# 标题格式：vx.x.x（仅版本号）
+# 内容格式：包含更新内容的描述和 Full Changelog 链接
+gh release create vx.x.x --title "vx.x.x" --notes "## 更新内容
+
+- 功能1描述
+- 功能2描述
+
+**Full Changelog**: https://github.com/LingNc/github-copilot-llm-gateway/compare/v上一个版本...vx.x.x"
+```
+
+**发布前检查清单**：
+- [ ] 所有功能已在 develop 分支测试通过
+- [ ] 版本号已更新（遵循版本号规范）
+- [ ] AGENTS.md 和开发进度文档已更新
+- [ ] 变更日志已记录本次更新内容
+
+**发布后检查**：
+- [ ] Release 页面可正常访问
+- [ ] 构建文件可正常下载
+- [ ] 版本标签指向正确的提交
+
 ### 维护责任
 - 每次会话开始前，AI 工具应优先读取 AGENTS.md 了解项目状态。
 - 每次重要变更后，AI 应及时更新此文档。

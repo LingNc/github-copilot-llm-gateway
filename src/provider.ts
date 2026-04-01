@@ -1096,7 +1096,6 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           },
         });
       }
-      }
 
       this.outputChannel.appendLine(`Merged ${modelMap.size} models (config + API)`);
     } catch (error) {

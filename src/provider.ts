@@ -180,7 +180,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     // Status bar color: green (safe), yellow (warning), red (critical)
     const color = percentage > 90 ? new vscode.ThemeColor('statusBarItem.errorForeground')
       : percentage > 70 ? new vscode.ThemeColor('statusBarItem.warningForeground')
-      : '#6bcf7f'; // Green for safe usage
+      : new vscode.ThemeColor('statusBarItem.prominentForeground'); // Use theme color for safe
 
     this.tokenStatusBarItem.text = `$(symbol-keyword) ${percentage}%`;
     this.tokenStatusBarItem.color = color;

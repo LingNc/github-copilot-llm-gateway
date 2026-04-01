@@ -881,6 +881,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           options,
           token
         );
+        // Log model IDs with their source for debugging duplicates
+        this.outputChannel.appendLine(`  Provider "${provider.id}" returned models: [${providerModels.map(m => m.id).join(', ')}]`);
         allModels.push(...providerModels);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

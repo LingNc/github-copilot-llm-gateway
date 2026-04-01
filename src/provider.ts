@@ -952,16 +952,16 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
       // Filter descriptions based on available levels
       const levelDescriptions: Record<string, string> = {
-        low: vscode.l10n.t('Faster responses with less reasoning'),
-        medium: vscode.l10n.t('Balanced reasoning and speed'),
-        high: vscode.l10n.t('Maximum reasoning depth'),
+        low: vscode.l10n.t('thinking.effort.low'),
+        medium: vscode.l10n.t('thinking.effort.medium'),
+        high: vscode.l10n.t('thinking.effort.high'),
       };
 
       return {
         properties: {
           reasoningEffort: {
             type: 'string',
-            title: vscode.l10n.t('Thinking Effort'),
+            title: vscode.l10n.t('thinking.effort.title'),
             enum: effortLevels,
             enumItemLabels: effortLevels.map(level => level.charAt(0).toUpperCase() + level.slice(1)),
             enumDescriptions: effortLevels.map(level => levelDescriptions[level] || level),
@@ -1471,6 +1471,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     // Get the client for this provider
     const client = this.getClient(providerId);
 
+    // Check if using Anthropic format (needed for thinking configuration and streaming)
+    const provider = this.configManager.getProvider(providerId);
+    const isAnthropic = provider?.apiFormat === 'anthropic';
+
     // Convert messages and categorize tokens
     const { messages: openAIMessages, categoryTokens } = await this.convertMessagesWithCategories(messages, model, token);
     const { messagesTokens, filesTokens, toolResultsTokens } = categoryTokens;
@@ -1674,10 +1678,6 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     // Log request
     const debugRequest = this.safeStringify(requestOptions);
     this.outputChannel.appendLine(debugRequest.length > 2000 ? `Request (truncated): ${debugRequest.substring(0, 2000)}...` : `Request: ${debugRequest}`);
-
-    // Check if using Anthropic format
-    const provider = this.configManager.getProvider(providerId);
-    const isAnthropic = provider?.apiFormat === 'anthropic';
 
     try {
       let totalContent = '';

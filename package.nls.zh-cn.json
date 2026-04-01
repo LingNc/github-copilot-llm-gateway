@@ -66,5 +66,9 @@
   "token.contextCompressed": "聊天历史已清除，Token 使用量减少",
   "token.compressConfirmMessage": "Token 使用: {0} / {1}\n\n是否压缩上下文以减少 Token 使用？",
   "token.compressButton": "压缩",
-  "token.cancelButton": "取消"
+  "token.cancelButton": "取消",
+  "thinking.effort.title": "思考等级",
+  "thinking.effort.low": "响应更快，推理较少",
+  "thinking.effort.medium": "平衡推理与速度",
+  "thinking.effort.high": "最大推理深度"
 }

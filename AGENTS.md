@@ -62,16 +62,13 @@ npm run package
 - [x] 模型 thinking 配置支持
 - [x] Copilot 上下文 token 显示修复（通过 progress.usage() 报告）
 - [x] Claude 3.7 Thinking 内容支持
-- [ ] 模型思考等级配置支持（Kimi/Qwen）
-- [ ] 完整测试和 bug 修复
-
-### Token 统计计划（按顺序）
-
 - [x] **计划 1**: Token 分类统计完善（Files 和 Tool Results）
+- [ ] 模型思考等级配置支持（Kimi/Qwen）
 - [ ] **计划 2**: Token 估算算法优化（precise/fast-estimate/none 模式）
 - [ ] **计划 3**: 切换模型时自动隐藏 Token 状态栏
 - [ ] **计划 4**: 模型上下文长度显示异常问题排查
 - [ ] **计划 5**: 整理上下文按钮样式优化
+- [ ] 完整测试和 bug 修复
 
 ### 未来计划（暂不实装）
 

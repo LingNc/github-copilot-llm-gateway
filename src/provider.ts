@@ -48,6 +48,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   // Current session token statistics
   private currentContextTokens = 0;
   private currentModelMaxTokens = 0;
+  private currentTokenDetails?: Array<{ category: string; label: string; percentage: number }>;
   // Token usage view provider
   private tokenUsageProvider?: TokenUsageViewProvider;
 
@@ -406,19 +407,26 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           messagesTokens += await this.provideTokenCount(model, part.value, token);
         } else if (part instanceof vscode.LanguageModelDataPart) {
           // Handle file data (images and other binary data)
-          const base64Data = Buffer.from(part.data).toString('base64');
           if (part.mimeType.startsWith('image/')) {
+            const base64Data = Buffer.from(part.data).toString('base64');
             const imageUrl = `data:${part.mimeType};base64,${base64Data}`;
             contentParts.push({ type: 'image_url', image_url: { url: imageUrl } });
             this.outputChannel.appendLine(`  Added image: ${part.mimeType}, ${part.data.length} bytes`);
+            // Estimate image tokens (rough estimate: ~170 tokens per 512x512 tile)
+            // Since we don't have actual dimensions, use file size as heuristic
+            // Assuming average compression ratio, ~150 tokens per 1KB of image data
+            const estimatedImageTokens = Math.max(85, Math.ceil(part.data.length / 1024 * 150));
+            filesTokens += estimatedImageTokens;
+            this.outputChannel.appendLine(`  Estimated image tokens: ${estimatedImageTokens}`);
           } else {
             // Handle other file types as text content
             const text = Buffer.from(part.data).toString('utf-8');
             contentParts.push({ type: 'text', text });
             this.outputChannel.appendLine(`  Added file: ${part.mimeType}, ${part.data.length} bytes`);
+            // Count file content tokens
+            const fileTokens = await this.provideTokenCount(model, text, token);
+            filesTokens += fileTokens;
           }
-          // Count all file data (images and other files) as filesTokens
-          filesTokens += await this.provideTokenCount(model, base64Data, token);
         } else if (part instanceof vscode.LanguageModelToolResultPart) {
           const toolResult = this.convertToolResultPart(part);
           toolResults.push(toolResult);
@@ -1593,6 +1601,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
       this.outputChannel.appendLine(`[Token Statistics Debug] Total details items: ${details.length}`);
 
+      // Save details for later updates
+      this.currentTokenDetails = details;
+
       this.updateTokenStatusBar(totalTokens, modelMaxContext, reservedOutputTokens, details);
     }
 
@@ -1866,7 +1877,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           Math.floor(modelMaxContext / 2)
         );
         const reservedForNext = Math.max(64, desiredOutputTokens - completionTokens);
-        this.updateTokenStatusBar(totalTokens, modelMaxContext, reservedForNext);
+        // Use saved details to preserve category breakdown
+        this.updateTokenStatusBar(totalTokens, modelMaxContext, reservedForNext, this.currentTokenDetails);
       }
 
       if (totalContent.length === 0 && totalToolCalls === 0) {

@@ -891,6 +891,17 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     }
 
     this.outputChannel.appendLine(`Found ${allModels.length} model(s) from all providers`);
+
+    // Check for duplicate model IDs
+    const idCounts = new Map<string, number>();
+    for (const model of allModels) {
+      idCounts.set(model.id, (idCounts.get(model.id) || 0) + 1);
+    }
+    const duplicates = Array.from(idCounts.entries()).filter(([_, count]) => count > 1);
+    if (duplicates.length > 0) {
+      this.outputChannel.appendLine(`WARNING: Found duplicate model IDs: ${duplicates.map(([id, count]) => `${id}(${count})`).join(', ')}`);
+    }
+
     return allModels;
   }
 
@@ -1060,7 +1071,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
       for (const apiModel of response.data) {
         // If model already in config, keep config values (config priority)
-        if (!modelMap.has(apiModel.id)) {
+        const exists = modelMap.has(apiModel.id);
+        this.outputChannel.appendLine(`    API model: ${apiModel.id}, existsInConfig=${exists}`);
+        if (!exists) {
           // Use defaults for API-only models
           const defaultMaxTokens = this.gatewayConfig.defaultMaxTokens;
           const defaultMaxOutput = this.gatewayConfig.defaultMaxOutputTokens;

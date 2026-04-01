@@ -125,6 +125,11 @@ export interface ModelModalities {
 export interface ThinkingOptions {
   type: 'enabled' | 'disabled';
   budgetTokens?: number;
+  /**
+   * Reasoning effort level for models that support it (e.g., Claude, o1/o3, Kimi, Qwen)
+   * Values: 'low', 'medium', 'high'
+   */
+  effort?: 'low' | 'medium' | 'high';
 }
 
 /**

@@ -1528,8 +1528,38 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     // Add model-specific options (e.g., thinking configuration)
     if (resolvedModel?.options?.thinking) {
-      requestOptions.thinking = resolvedModel.options.thinking;
-      this.outputChannel.appendLine(`Thinking enabled: type=${resolvedModel.options.thinking.type}, budgetTokens=${resolvedModel.options.thinking.budgetTokens || 'default'}`);
+      const thinking = resolvedModel.options.thinking;
+
+      // Handle different API formats for thinking configuration
+      if (isAnthropic) {
+        // Anthropic format: { type: 'enabled', budget_tokens: number }
+        requestOptions.thinking = {
+          type: thinking.type,
+          budget_tokens: thinking.budgetTokens,
+        };
+      } else {
+        // OpenAI-compatible format
+        // For o1/o3 models: reasoning_effort field
+        // For other models: thinking object
+        if (thinking.effort) {
+          requestOptions.reasoning_effort = thinking.effort;
+        }
+
+        // Some APIs (like Kimi/Qwen) may use different parameter names
+        // Add thinking object with budget_tokens if specified
+        if (thinking.budgetTokens) {
+          requestOptions.thinking = {
+            type: thinking.type,
+            budget_tokens: thinking.budgetTokens,
+          };
+        }
+      }
+
+      this.outputChannel.appendLine(
+        `Thinking configured: type=${thinking.type}, ` +
+        `${thinking.effort ? `effort=${thinking.effort}, ` : ''}` +
+        `${thinking.budgetTokens ? `budgetTokens=${thinking.budgetTokens}` : 'budgetTokens=default'}`
+      );
     }
 
     if (options.modelOptions) {

@@ -59,11 +59,10 @@ npm run package
 - [x] 配置文件支持和热重载
 - [x] 中英双语支持
 - [x] Anthropic API 支持
-- [x] 模型 thinking 配置支持
+- [x] 模型 thinking 配置支持（含思考等级 effort）
 - [x] Copilot 上下文 token 显示修复（通过 progress.usage() 报告）
 - [x] Claude 3.7 Thinking 内容支持
 - [x] **计划 1**: Token 分类统计完善（Files 和 Tool Results）
-- [ ] 模型思考等级配置支持（Kimi/Qwen）
 - [ ] **计划 2**: Token 估算算法优化（precise/fast-estimate/none 模式）
 - [ ] **计划 3**: 切换模型时自动隐藏 Token 状态栏
 - [ ] **计划 4**: 模型上下文长度显示异常问题排查
@@ -312,19 +311,51 @@ OpenAI/Anthropic Compatible Server (vLLM/Ollama/Anthropic/etc)
       "apiKey": "YOUR_API_KEY",
       "apiFormat": "anthropic",
       "models": {
-        "claude-3-5-sonnet-20241022": {
-          "name": "Claude 3.5 Sonnet",
+        "claude-3-7-sonnet-20250219": {
+          "name": "Claude 3.7 Sonnet",
           "limit": { "context": 200000, "output": 8192 },
+          "options": { "thinking": { "type": "enabled", "budgetTokens": 16000, "effort": "high" } },
+          "capabilities": { "toolCalling": true, "vision": true }
+        }
+      }
+    },
+    "openai": {
+      "name": "OpenAI",
+      "baseURL": "https://api.openai.com/v1",
+      "apiKey": "YOUR_API_KEY",
+      "apiFormat": "openai",
+      "models": {
+        "o3-mini": {
+          "name": "o3-mini",
+          "limit": { "context": 128000, "output": 32768 },
+          "options": { "thinking": { "type": "enabled", "effort": "medium" } },
           "capabilities": { "toolCalling": true, "vision": true }
         }
       }
     }
-  },
-  "github.copilot.llm-gateway.showProviderPrefix": true,
-  "github.copilot.llm-gateway.providerNameStyle": "slash",
-  "github.copilot.llm-gateway.configMode": "config-priority"
+  }
 }
 ```
+
+### thinking 配置说明
+
+支持思考能力的模型（如 Claude 3.7, o1/o3, Kimi, Qwen）可以配置思考深度：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `type` | `'enabled' \| 'disabled'` | 是否启用思考 |
+| `budgetTokens` | `number` | 思考预算 token 数（可选） |
+| `effort` | `'low' \| 'medium' \| 'high'` | 思考深度等级（可选） |
+
+**effort 等级说明**:
+- `low`: 更快的响应，较少的思考
+- `medium`: 平衡的思考深度和速度（默认）
+- `high`: 最大思考深度，适合复杂任务
+
+**不同 API 格式的处理**:
+- **Anthropic**: 使用 `thinking` 对象（含 `budget_tokens`）
+- **OpenAI (o1/o3)**: 使用 `reasoning_effort` 字段
+- **Kimi/Qwen**: 根据 API 格式自动适配
 
 ### apiFormat 说明
 

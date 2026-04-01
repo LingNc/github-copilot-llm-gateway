@@ -142,6 +142,16 @@ function registerCommands(
   );
   context.subscriptions.push(showTokenUsageCommand);
 
+  // No-op command for status bar click (just visual feedback, tooltip reappears)
+  const statusBarNoOpCommand = vscode.commands.registerCommand(
+    'github.copilot.llm-gateway.statusBarNoOp',
+    () => {
+      // Intentionally empty - clicking provides visual feedback
+      // but tooltip immediately reappears if mouse is still over the status bar
+    }
+  );
+  context.subscriptions.push(statusBarNoOpCommand);
+
   outputChannel.appendLine(`Registered commands`);
 }
 

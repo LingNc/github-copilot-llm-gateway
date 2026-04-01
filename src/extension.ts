@@ -128,6 +128,20 @@ function registerCommands(
   );
   context.subscriptions.push(compactContextCommand);
 
+  // Show token usage command (called when clicking status bar)
+  const showTokenUsageCommand = vscode.commands.registerCommand(
+    'github.copilot.llm-gateway.showTokenUsage',
+    async () => {
+      const provider = providerManager.getProvider();
+      if (provider) {
+        await provider.showTokenUsage();
+      } else {
+        vscode.window.showErrorMessage('LLM Gateway: Provider not initialized.');
+      }
+    }
+  );
+  context.subscriptions.push(showTokenUsageCommand);
+
   outputChannel.appendLine(`Registered commands`);
 }
 

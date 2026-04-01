@@ -1337,6 +1337,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
   /**
    * Calculate safe max output tokens
+   * Ensures minimum output capacity even under high input load
    */
   private calculateSafeMaxOutputTokens(estimatedInputTokens: number, toolsOverhead: number, modelId: string): number {
     const modelAndProvider = this.findModelAndProvider(modelId);
@@ -1344,15 +1345,36 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     const modelMaxContext = resolvedModel?.limit.context ?? this.gatewayConfig.defaultMaxTokens;
     const defaultMaxOutput = resolvedModel?.limit.output ?? this.gatewayConfig.defaultMaxOutputTokens;
     const totalEstimatedTokens = estimatedInputTokens + toolsOverhead;
-    const conservativeInputEstimate = Math.ceil(totalEstimatedTokens * 1.2);
-    const bufferTokens = 256;
+
+    // Dynamic buffer: smaller buffer when input is high to ensure output capacity
+    const inputPercentage = totalEstimatedTokens / modelMaxContext;
+    let bufferTokens: number;
+    let conservativeMultiplier: number;
+
+    if (inputPercentage > 0.8) {
+      // High usage: minimal buffer, no conservative multiplier
+      bufferTokens = 128;
+      conservativeMultiplier = 1.0;
+    } else if (inputPercentage > 0.6) {
+      // Medium usage: moderate buffer
+      bufferTokens = 192;
+      conservativeMultiplier = 1.1;
+    } else {
+      // Low usage: standard buffer
+      bufferTokens = 256;
+      conservativeMultiplier = 1.2;
+    }
+
+    const conservativeInputEstimate = Math.ceil(totalEstimatedTokens * conservativeMultiplier);
 
     let safeMaxOutputTokens = Math.min(
       defaultMaxOutput,
       Math.floor(modelMaxContext - conservativeInputEstimate - bufferTokens)
     );
 
-    return Math.max(64, safeMaxOutputTokens);
+    // Ensure minimum 4K output capacity for reasonable responses
+    const minOutputTokens = Math.min(4096, Math.floor(modelMaxContext * 0.2));
+    return Math.max(minOutputTokens, safeMaxOutputTokens);
   }
 
   /**

@@ -214,19 +214,26 @@
           "markdownDescription": "%config.enableDebugLogs.markdownDescription%",
           "order": 13
         },
+        "github.copilot.llm-gateway.enableTokenDebugLogs": {
+          "type": "boolean",
+          "default": false,
+          "description": "%config.enableTokenDebugLogs.description%",
+          "markdownDescription": "%config.enableTokenDebugLogs.markdownDescription%",
+          "order": 14
+        },
         "github.copilot.llm-gateway.enableTokenStatistics": {
           "type": "boolean",
           "default": true,
           "description": "%config.enableTokenStatistics.description%",
           "markdownDescription": "%config.enableTokenStatistics.markdownDescription%",
-          "order": 14
+          "order": 15
         },
         "github.copilot.llm-gateway.enableCopilotUsageReport": {
           "type": "boolean",
           "default": false,
           "description": "%config.enableCopilotUsageReport.description%",
           "markdownDescription": "%config.enableCopilotUsageReport.markdownDescription%",
-          "order": 15
+          "order": 16
         }
       }
     }

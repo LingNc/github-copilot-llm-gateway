@@ -412,10 +412,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
             const imageUrl = `data:${part.mimeType};base64,${base64Data}`;
             contentParts.push({ type: 'image_url', image_url: { url: imageUrl } });
             this.outputChannel.appendLine(`  Added image: ${part.mimeType}, ${part.data.length} bytes`);
-            // Estimate image tokens (rough estimate: ~170 tokens per 512x512 tile)
-            // Since we don't have actual dimensions, use file size as heuristic
-            // Assuming average compression ratio, ~150 tokens per 1KB of image data
-            const estimatedImageTokens = Math.max(85, Math.ceil(part.data.length / 1024 * 150));
+            // Calculate image tokens based on dimensions
+            const estimatedImageTokens = this.calculateImageTokens(part.data, part.mimeType);
             filesTokens += estimatedImageTokens;
             this.outputChannel.appendLine(`  Estimated image tokens: ${estimatedImageTokens}`);
           } else {
@@ -1995,6 +1993,123 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       }
       return count;
     }
+  }
+
+  /**
+   * Calculate image tokens based on OpenAI/GPT-4V formula:
+   * 1. Resize to fit within 2048x2048 (maintaining aspect ratio)
+   * 2. Scale so shortest side is 768px (optional, for low detail mode)
+   * 3. Divide into 512x512 tiles
+   * 4. Token count = (num_tiles_x * num_tiles_y) * 170 + 85 (base tokens)
+   *
+   * Simplified formula: tokens = ceil(width/512) * ceil(height/512) * 170 + 85
+   */
+  private calculateImageTokens(data: Uint8Array, mimeType: string): number {
+    // Try to extract dimensions from image data
+    const dimensions = this.extractImageDimensions(data, mimeType);
+
+    if (dimensions) {
+      const { width, height } = dimensions;
+
+      // Step 1: Resize to fit within 2048x2048
+      let w = width;
+      let h = height;
+      const maxSize = 2048;
+      if (w > maxSize || h > maxSize) {
+        const scale = maxSize / Math.max(w, h);
+        w = Math.floor(w * scale);
+        h = Math.floor(h * scale);
+      }
+
+      // Step 2: Calculate tiles (512x512 each)
+      const tilesX = Math.ceil(w / 512);
+      const tilesY = Math.ceil(h / 512);
+      const totalTiles = tilesX * tilesY;
+
+      // Step 3: Calculate tokens (170 per tile + 85 base)
+      const tokens = totalTiles * 170 + 85;
+
+      this.outputChannel.appendLine(`  Image dimensions: ${width}x${height} -> scaled ${w}x${h}, tiles: ${tilesX}x${tilesY}=${totalTiles}, tokens: ${tokens}`);
+      return tokens;
+    }
+
+    // Fallback: estimate based on file size
+    // This is less accurate but provides a reasonable estimate
+    const fileSizeKB = data.length / 1024;
+    // Assume 1KB ≈ 8 tiles (rough estimate for compressed images)
+    const estimatedTiles = Math.max(1, Math.ceil(fileSizeKB / 8));
+    const tokens = estimatedTiles * 170 + 85;
+
+    this.outputChannel.appendLine(`  Image size: ${fileSizeKB.toFixed(2)}KB, estimated tiles: ${estimatedTiles}, tokens: ${tokens} (dimensions unknown)`);
+    return tokens;
+  }
+
+  /**
+   * Extract image dimensions from binary data
+   * Supports PNG, JPEG, GIF, WebP
+   */
+  private extractImageDimensions(data: Uint8Array, mimeType: string): { width: number; height: number } | null {
+    try {
+      const buffer = Buffer.from(data);
+
+      // PNG: dimensions at offset 16-24 (big-endian)
+      if (mimeType === 'image/png') {
+        if (buffer.length >= 24 && buffer.toString('hex', 0, 8) === '89504e470d0a1a0a') {
+          const width = buffer.readUInt32BE(16);
+          const height = buffer.readUInt32BE(20);
+          return { width, height };
+        }
+      }
+
+      // JPEG: parse SOF markers
+      if (mimeType === 'image/jpeg' || mimeType === 'image/jpg') {
+        let offset = 2; // Skip SOI marker
+        while (offset < buffer.length - 8) {
+          if (buffer[offset] !== 0xff) {
+            offset++;
+            continue;
+          }
+          const marker = buffer[offset + 1];
+          // SOF0, SOF1, SOF2, SOF3, SOF5, SOF6, SOF7, SOF9, SOF10, SOF11, SOF13, SOF14, SOF15
+          if ((marker >= 0xc0 && marker <= 0xc3) || (marker >= 0xc5 && marker <= 0xc7) ||
+              (marker >= 0xc9 && marker <= 0xcb) || (marker >= 0xcd && marker <= 0xcf)) {
+            const height = buffer.readUInt16BE(offset + 5);
+            const width = buffer.readUInt16BE(offset + 7);
+            return { width, height };
+          }
+          // Skip segment
+          const segmentLength = buffer.readUInt16BE(offset + 2);
+          offset += 2 + segmentLength;
+        }
+      }
+
+      // GIF: dimensions at offset 6-10 (little-endian)
+      if (mimeType === 'image/gif') {
+        const sig = buffer.toString('ascii', 0, 6);
+        if (buffer.length >= 10 && (sig === 'GIF87a' || sig === 'GIF89a')) {
+          const width = buffer.readUInt16LE(6);
+          const height = buffer.readUInt16LE(8);
+          return { width, height };
+        }
+      }
+
+      // WebP: VP8 or VP8L chunk
+      if (mimeType === 'image/webp') {
+        if (buffer.length >= 30 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') {
+          // Try VP8 (lossy) - simplified
+          const vp8Index = buffer.indexOf(Buffer.from('VP8 '), 12);
+          if (vp8Index !== -1 && buffer.length >= vp8Index + 14) {
+            // VP8 dimensions in bitstream (simplified extraction)
+            const width = buffer.readUInt16LE(vp8Index + 10) & 0x3fff;
+            const height = buffer.readUInt16LE(vp8Index + 8) & 0x3fff;
+            if (width > 0 && height > 0) return { width, height };
+          }
+        }
+      }
+    } catch (error) {
+      this.outputChannel.appendLine(`  Failed to extract image dimensions: ${error}`);
+    }
+    return null;
   }
 
   /**

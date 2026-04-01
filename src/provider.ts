@@ -1731,11 +1731,19 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           }
 
           // Handle thinking content from Claude 3.7+
-          // Thinking content is stored but not directly reported to avoid cluttering the output
+          // Try to use LanguageModelThinkingPart if available (VS Code API), otherwise accumulate silently
           if (chunk.thinking) {
             totalContent += chunk.thinking;
-            // Optionally log thinking content for debugging
-            // this.outputChannel.appendLine(`[Thinking] ${chunk.thinking.substring(0, 100)}...`);
+            // Try to report as ThinkingPart for collapsible UI, fallback to silent accumulation
+            try {
+              // @ts-ignore - LanguageModelThinkingPart may not be in the types yet
+              if (vscode.LanguageModelThinkingPart) {
+                // @ts-ignore
+                progress.report(new vscode.LanguageModelThinkingPart(chunk.thinking));
+              }
+            } catch {
+              // ThinkingPart not available, don't expose thinking to user
+            }
           }
 
           // Capture usage data (Anthropic usually provides this)
@@ -1762,10 +1770,18 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           }
 
           // Handle reasoning_content (thinking) from OpenAI-compatible APIs (e.g., DeepSeek, Qwen)
-          // Store thinking content internally but don't expose to user
+          // Try to use LanguageModelThinkingPart if available for collapsible UI
           if (chunk.reasoning) {
             totalContent += chunk.reasoning;
-            // Not reporting reasoning content to avoid exposing internal thinking
+            try {
+              // @ts-ignore - LanguageModelThinkingPart may not be in the types yet
+              if (vscode.LanguageModelThinkingPart) {
+                // @ts-ignore
+                progress.report(new vscode.LanguageModelThinkingPart(chunk.reasoning));
+              }
+            } catch {
+              // ThinkingPart not available, don't expose thinking to user
+            }
           }
 
           // Capture usage data if provided by API
@@ -1863,10 +1879,15 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
             this.outputChannel.appendLine(`Token usage via usage() failed (API may have changed): ${usageError}`);
           }
         } else {
-          this.outputChannel.appendLine(`Token usage tracking: prompt=${promptTokens}, completion=${completionTokens}`);
+          this.outputChannel.appendLine(`Token usage tracking: prompt=${promptTokens}, completion=${completionTokens}, total=${promptTokens + completionTokens}`);
         }
 
-        // Update status bar after conversation completes
+        // Log detailed token breakdown from API
+        this.outputChannel.appendLine(`[Token API Response] prompt_tokens=${promptTokens}, completion_tokens=${completionTokens}, total_tokens=${promptTokens + completionTokens}`);
+        this.outputChannel.appendLine(`[Token Comparison] estimated_input=${estimatedInputTokens}, actual_prompt=${promptTokens}, diff=${promptTokens - estimatedInputTokens}`);
+
+        // Update status bar after conversation completes with ACTUAL token counts from API
+        // This gives us accurate picture of token usage including precise image token counts
         const totalTokens = promptTokens + completionTokens;
         this.currentSessionPromptTokens = promptTokens;
         this.currentSessionCompletionTokens = completionTokens;

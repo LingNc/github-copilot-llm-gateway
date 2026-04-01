@@ -965,16 +965,16 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
       // Filter descriptions based on available levels
       const levelDescriptions: Record<string, string> = {
-        low: vscode.l10n.t('thinking.effort.low'),
-        medium: vscode.l10n.t('thinking.effort.medium'),
-        high: vscode.l10n.t('thinking.effort.high'),
+        low: vscode.l10n.t('Faster responses with less reasoning'),
+        medium: vscode.l10n.t('Balanced reasoning and speed'),
+        high: vscode.l10n.t('Maximum reasoning depth'),
       };
 
       return {
         properties: {
           reasoningEffort: {
             type: 'string',
-            title: vscode.l10n.t('thinking.effort.title'),
+            title: vscode.l10n.t('Thinking Effort'),
             enum: effortLevels,
             enumItemLabels: effortLevels.map(level => level.charAt(0).toUpperCase() + level.slice(1)),
             enumDescriptions: effortLevels.map(level => levelDescriptions[level] || level),
@@ -1064,33 +1064,38 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       });
     }
 
-    // Then try to fetch from API and merge
+    // If there are configured models, use them directly without API call
+    if (configuredModels.length > 0) {
+      this.outputChannel.appendLine(`  Provider "${providerId}": using ${configuredModels.length} configured model(s), skipping API fetch`);
+      return Array.from(modelMap.values());
+    }
+
+    // Only fetch from API if no models are configured
+    this.outputChannel.appendLine(`  Provider "${providerId}": no configured models, fetching from API...`);
     try {
       const client = this.getClient(providerId);
       const response = await client.fetchModels();
 
       for (const apiModel of response.data) {
-        // If model already in config, keep config values (config priority)
-        const exists = modelMap.has(apiModel.id);
-        this.outputChannel.appendLine(`    API model: ${apiModel.id}, existsInConfig=${exists}`);
-        if (!exists) {
-          // Use defaults for API-only models
-          const defaultMaxTokens = this.gatewayConfig.defaultMaxTokens;
-          const defaultMaxOutput = this.gatewayConfig.defaultMaxOutputTokens;
+        // Add API-only models
+        this.outputChannel.appendLine(`    API model: ${apiModel.id}`);
+        // Use defaults for API-only models
+        const defaultMaxTokens = this.gatewayConfig.defaultMaxTokens;
+        const defaultMaxOutput = this.gatewayConfig.defaultMaxOutputTokens;
 
-          modelMap.set(apiModel.id, {
-            id: apiModel.id,
-            name: formatName(apiModel.id),
-            family: providerId,
-            maxInputTokens: defaultMaxTokens,
-            maxOutputTokens: defaultMaxOutput,
-            version: '',
-            capabilities: {
-              toolCalling: this.gatewayConfig.enableToolCalling,
-              imageInput: false,
-            },
-          });
-        }
+        modelMap.set(apiModel.id, {
+          id: apiModel.id,
+          name: formatName(apiModel.id),
+          family: providerId,
+          maxInputTokens: defaultMaxTokens,
+          maxOutputTokens: defaultMaxOutput,
+          version: '',
+          capabilities: {
+            toolCalling: this.gatewayConfig.enableToolCalling,
+            imageInput: false,
+          },
+        });
+      }
       }
 
       this.outputChannel.appendLine(`Merged ${modelMap.size} models (config + API)`);

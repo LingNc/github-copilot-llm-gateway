@@ -50,6 +50,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   private currentModelMaxTokens = 0;
   // Token usage view provider
   private tokenUsageProvider?: TokenUsageViewProvider;
+  // Cache for returned models to avoid duplicates across multiple calls
+  private returnedModelIds?: Set<string>;
 
   constructor(
     context: vscode.ExtensionContext,
@@ -862,6 +864,11 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     this.outputChannel.appendLine(`Fetching models from all providers (mode: ${configMode}, style: ${providerNameStyle})...`);
 
+    // Initialize cache on first call
+    if (!this.returnedModelIds) {
+      this.returnedModelIds = new Set<string>();
+    }
+
     const allModels: vscode.LanguageModelChatInformation[] = [];
     const providers = this.configManager.getProviders();
 
@@ -883,7 +890,17 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         );
         // Log model IDs with their source for debugging duplicates
         this.outputChannel.appendLine(`  Provider "${provider.id}" returned models: [${providerModels.map(m => m.id).join(', ')}]`);
-        allModels.push(...providerModels);
+
+        // Filter out models that have already been returned in previous calls
+        const newModels = providerModels.filter(m => {
+          if (this.returnedModelIds!.has(m.id)) {
+            this.outputChannel.appendLine(`  Skipping duplicate model: ${m.id} (already returned)`);
+            return false;
+          }
+          this.returnedModelIds!.add(m.id);
+          return true;
+        });
+        allModels.push(...newModels);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         this.outputChannel.appendLine(`Failed to fetch models from provider "${provider.id}": ${message}`);
@@ -2022,6 +2039,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     this.defaultClient.updateConfig(this.gatewayConfig);
     // Clear client cache to force recreation with new config
     this.clients.clear();
+    // Clear model cache to allow fresh model registration after reload
+    this.returnedModelIds = undefined;
     // Update cached debug settings
     this.updateDebugSettings();
     this.outputChannel.appendLine('Configuration reloaded');

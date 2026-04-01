@@ -220,28 +220,35 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     const reservedPercentage = Math.round((reservedTokens / maxTokens) * 100);
     tooltip.appendMarkdown(`${this.formatNumber(reservedTokens)} ${this.getLocalizedString('token.remainingForResponse')} (${reservedPercentage}%)\n\n`);
 
-    // Build categories table
-    const allItems: Array<{ category: string; label: string; percentage: number }> = [];
+    // Build categories list (vertical layout like Copilot Chat)
+    if (systemItems.length > 0 || userContextItems.length > 0) {
+      tooltip.appendMarkdown(`**${this.getLocalizedString('token.system')}**  \n`);
 
-    if (systemItems.length > 0) {
-      allItems.push(...systemItems.map(item => ({ category: 'System', label: item.label, percentage: item.percentage })));
-    }
-    if (userContextItems.length > 0) {
-      // Sort items to ensure consistent order: Messages, Files, Tool Results
-      const sortedItems = userContextItems.sort((a, b) => {
-        const order = ['Messages', 'Files', 'Tool Results'];
-        return order.indexOf(a.label) - order.indexOf(b.label);
-      });
-      allItems.push(...sortedItems.map(item => ({ category: 'User Context', label: item.label, percentage: item.percentage })));
-    }
-
-    if (allItems.length > 0) {
-      tooltip.appendMarkdown(`| Category | Item | % |\n`);
-      tooltip.appendMarkdown(`|:---|:---|---:|\n`);
-      for (const item of allItems) {
+      // System items
+      for (const item of systemItems) {
         const usedPercentage = usedTokens > 0 ? Math.round((item.percentage / 100) * (usedTokens / maxTokens) * 100) : 0;
-        tooltip.appendMarkdown(`| ${item.category} | ${item.label} | ${usedPercentage}% |\n`);
+        tooltip.appendMarkdown(`${item.label} ${usedPercentage}%  \n`);
       }
+
+      // Empty line between sections
+      if (systemItems.length > 0 && userContextItems.length > 0) {
+        tooltip.appendMarkdown(`  \n`);
+      }
+
+      // User Context items
+      if (userContextItems.length > 0) {
+        tooltip.appendMarkdown(`**${this.getLocalizedString('token.userContext')}**  \n`);
+        // Sort items to ensure consistent order: Messages, Files, Tool Results
+        const sortedItems = userContextItems.sort((a, b) => {
+          const order = ['Messages', 'Files', 'Tool Results'];
+          return order.indexOf(a.label) - order.indexOf(b.label);
+        });
+        for (const item of sortedItems) {
+          const usedPercentage = usedTokens > 0 ? Math.round((item.percentage / 100) * (usedTokens / maxTokens) * 100) : 0;
+          tooltip.appendMarkdown(`${item.label} ${usedPercentage}%  \n`);
+        }
+      }
+
       tooltip.appendMarkdown(`\n`);
     }
 
@@ -375,6 +382,16 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       const toolResults: Record<string, unknown>[] = [];
       const toolCalls: Record<string, unknown>[] = [];
       const contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
+
+      // Debug: log message content types
+      const contentTypes = msg.content.map((p: unknown) => {
+        if (p instanceof vscode.LanguageModelTextPart) return 'text';
+        if (p instanceof vscode.LanguageModelDataPart) return 'data';
+        if (p instanceof vscode.LanguageModelToolResultPart) return 'tool_result';
+        if (p instanceof vscode.LanguageModelToolCallPart) return 'tool_call';
+        return 'unknown';
+      });
+      this.outputChannel.appendLine(`  Message role=${role}, contentTypes=[${contentTypes.join(', ')}], contentCount=${msg.content.length}`);
 
       for (const part of msg.content) {
         if (part instanceof vscode.LanguageModelTextPart) {
@@ -1445,6 +1462,14 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       const filesPercentage = Math.round((filesTokens / totalTokens) * 100);
       const toolResultsPercentage = Math.round((toolResultsTokens / totalTokens) * 100);
 
+      // Use safeMaxOutputTokens (dynamic remaining capacity) for "reserved for response"
+      // This represents the actual available output tokens for this request
+      const reservedOutputTokens = safeMaxOutputTokens;
+
+      this.outputChannel.appendLine(
+        `[Token Statistics] reservedOutputTokens=${reservedOutputTokens}, safeMaxOutputTokens=${safeMaxOutputTokens}, desiredOutputTokens=${desiredOutputTokens}, estimatedInputTokens=${estimatedInputTokens}`
+      );
+
       // Build details array with all 5 categories
       const details: Array<{ category: string; label: string; percentage: number }> = [
         { category: 'System', label: 'System Instructions', percentage: systemPercentage },
@@ -1466,7 +1491,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         details.push({ category: 'User Context', label: 'Tool Results', percentage: toolResultsPercentage });
       }
 
-      this.updateTokenStatusBar(totalTokens, modelMaxContext, safeMaxOutputTokens, details);
+      this.updateTokenStatusBar(totalTokens, modelMaxContext, reservedOutputTokens, details);
     }
 
     // Build request

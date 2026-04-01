@@ -1524,7 +1524,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       resolvedModel?.limit.output ?? this.gatewayConfig.defaultMaxOutputTokens,
       Math.floor(modelMaxContext / 2)
     );
-    const toolsTokenEstimate = options.tools ? Math.ceil(this.safeStringify(options.tools).length / 4 * 1.2) : 0;
+    const toolsTokenEstimate = options.tools ? await this.provideTokenCount(model, this.safeStringify(options.tools), token) : 0;
     const maxInputTokens = modelMaxContext - desiredOutputTokens - toolsTokenEstimate - 256;
 
     const truncatedMessages = this.truncateMessagesToFit(openAIMessages, maxInputTokens);
@@ -1541,7 +1541,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       })
       .join('\n');
 
-    const toolsOverhead = options.tools ? Math.ceil(this.safeStringify(options.tools).length / 4) : 0;
+    const toolsOverhead = options.tools ? await this.provideTokenCount(model, this.safeStringify(options.tools), token) : 0;
     const estimatedInputTokens = await this.provideTokenCount(model, inputText, token) + toolsOverhead;
     const safeMaxOutputTokens = this.calculateSafeMaxOutputTokens(estimatedInputTokens, toolsOverhead, model.id);
 

@@ -925,6 +925,46 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   }
 
   /**
+   * Build configuration schema for model picker (e.g., thinking effort selector)
+   * Reference: Copilot Chat's buildConfigurationSchema implementation
+   */
+  private buildConfigurationSchema(
+    model: ResolvedModel
+  ): vscode.LanguageModelConfigurationSchema | undefined {
+    // Check if model supports thinking/reasoning (type: 'enabled')
+    if (!model.options?.thinking || model.options.thinking.type !== 'enabled') {
+      return undefined;
+    }
+
+    // Define effort levels
+    const effortLevels = ['low', 'medium', 'high'];
+
+    // Use configured effort as default, or 'medium' if not specified
+    const defaultEffort = model.options.thinking.effort || 'medium';
+
+    return {
+      properties: {
+        reasoningEffort: {
+          type: 'string',
+          title: vscode.l10n.t('Thinking Effort'),
+          enum: effortLevels,
+          enumItemLabels: effortLevels.map(level => level.charAt(0).toUpperCase() + level.slice(1)),
+          enumDescriptions: effortLevels.map(level => {
+            switch (level) {
+              case 'low': return vscode.l10n.t('Faster responses with less reasoning');
+              case 'medium': return vscode.l10n.t('Balanced reasoning and speed');
+              case 'high': return vscode.l10n.t('Maximum reasoning depth');
+              default: return level;
+            }
+          }),
+          default: defaultEffort,
+          group: 'navigation',
+        }
+      }
+    };
+  }
+
+  /**
    * Build model info from configuration only
    */
   private buildModelInfoFromConfig(
@@ -939,6 +979,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       const formattedName = showProviderPrefix
         ? (providerNameStyle === 'slash' ? `${providerId}/${model.name}` : `[${providerId}] ${model.name}`)
         : model.name;
+
+      // Build configuration schema if model supports thinking effort
+      const configurationSchema = this.buildConfigurationSchema(model);
+
       return {
         id: model.id,
         name: formattedName,
@@ -950,6 +994,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           toolCalling: model.capabilities?.toolCalling ?? true,
           imageInput: model.capabilities?.vision ?? false,
         },
+        configurationSchema,
       };
     });
   }
@@ -975,6 +1020,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     };
 
     for (const model of configuredModels) {
+      // Build configuration schema if model supports thinking effort
+      const configurationSchema = this.buildConfigurationSchema(model);
+
       modelMap.set(model.id, {
         id: model.id,
         name: formatName(model.name),
@@ -986,6 +1034,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           toolCalling: model.capabilities?.toolCalling ?? true,
           imageInput: model.capabilities?.vision ?? false,
         },
+        configurationSchema,
       });
     }
 
@@ -1101,6 +1150,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       for (const apiModel of response.data) {
         const configuredModel = modelMap.get(apiModel.id);
 
+        // Build configuration schema if configured model supports thinking
+        const configurationSchema = configuredModel ? this.buildConfigurationSchema(configuredModel) : undefined;
+
         // API priority: use API model id, but config values if available
         result.push({
           id: apiModel.id,
@@ -1113,6 +1165,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
             toolCalling: configuredModel?.capabilities?.toolCalling ?? this.gatewayConfig.enableToolCalling,
             imageInput: configuredModel?.capabilities?.vision ?? false,
           },
+          configurationSchema,
         });
       }
 
@@ -1527,8 +1580,12 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     }
 
     // Add model-specific options (e.g., thinking configuration)
-    if (resolvedModel?.options?.thinking) {
+    if (resolvedModel?.options?.thinking && resolvedModel.options.thinking.type === 'enabled') {
       const thinking = resolvedModel.options.thinking;
+
+      // Get user-selected effort from model configuration, fallback to config default
+      const userSelectedEffort = (options as unknown as Record<string, unknown>)?.modelConfiguration?.reasoningEffort;
+      const effectiveEffort = typeof userSelectedEffort === 'string' ? userSelectedEffort : thinking.effort;
 
       // Handle different API formats for thinking configuration
       if (isAnthropic) {
@@ -1541,8 +1598,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         // OpenAI-compatible format
         // For o1/o3 models: reasoning_effort field
         // For other models: thinking object
-        if (thinking.effort) {
-          requestOptions.reasoning_effort = thinking.effort;
+        if (effectiveEffort) {
+          requestOptions.reasoning_effort = effectiveEffort;
         }
 
         // Some APIs (like Kimi/Qwen) may use different parameter names
@@ -1557,7 +1614,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
       this.outputChannel.appendLine(
         `Thinking configured: type=${thinking.type}, ` +
-        `${thinking.effort ? `effort=${thinking.effort}, ` : ''}` +
+        `${effectiveEffort ? `effort=${effectiveEffort}${userSelectedEffort ? ' (user selected)' : ' (config default)'}, ` : ''}` +
         `${thinking.budgetTokens ? `budgetTokens=${thinking.budgetTokens}` : 'budgetTokens=default'}`
       );
     }

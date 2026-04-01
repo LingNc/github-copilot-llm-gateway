@@ -1594,7 +1594,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       temperature,
     };
 
-    // Add optional sampling parameters if configured
+    // Add optional sampling parameters ONLY if explicitly configured
+    // Leave unset to let server use its own defaults
     if (resolvedModel?.options?.topP !== undefined) {
       requestOptions.top_p = resolvedModel.options.topP;
     }

@@ -296,10 +296,10 @@ Your self-hosted models now appear in Copilot Chat. Select one and start coding 
 | `limit.output` | number | Maximum output tokens |
 | `capabilities.toolCalling` | boolean | Enable tool calling |
 | `capabilities.vision` | boolean | Enable vision support |
-| `options.temperature` | number | Sampling temperature (0-2), default: 0.7 |
-| `options.topP` | number | Nucleus sampling (0-1), default: 1.0 |
-| `options.frequencyPenalty` | number | Frequency penalty (-2 to 2), default: 0 |
-| `options.presencePenalty` | number | Presence penalty (-2 to 2), default: 0 |
+| `options.temperature` | number | Sampling temperature (0-2), default 0.7 if not set |
+| `options.topP` | number | Nucleus sampling (0-1), only sent if configured |
+| `options.frequencyPenalty` | number | Frequency penalty (-2 to 2), only sent if configured |
+| `options.presencePenalty` | number | Presence penalty (-2 to 2), only sent if configured |
 | `options.thinking` | object | Thinking mode configuration (see below) |
 
 ### Thinking Configuration

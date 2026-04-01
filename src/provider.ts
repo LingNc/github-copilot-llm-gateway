@@ -1004,13 +1004,20 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         high: vscode.l10n.t('Maximum reasoning depth'),
       };
 
+      // Map effort levels to localized labels and descriptions
+      const levelLabels: Record<string, string> = {
+        low: vscode.l10n.t('Low'),
+        medium: vscode.l10n.t('Medium'),
+        high: vscode.l10n.t('High'),
+      };
+
       return {
         properties: {
           reasoningEffort: {
             type: 'string',
             title: vscode.l10n.t('Thinking Effort'),
             enum: effortLevels,
-            enumItemLabels: effortLevels.map(level => level.charAt(0).toUpperCase() + level.slice(1)),
+            enumItemLabels: effortLevels.map(level => levelLabels[level] || level.charAt(0).toUpperCase() + level.slice(1)),
             enumDescriptions: effortLevels.map(level => levelDescriptions[level] || level),
             default: defaultEffort,
             group: 'navigation',

@@ -68,6 +68,9 @@
   "token.compressButton": "压缩",
   "token.cancelButton": "取消",
   "Thinking Effort": "思考等级",
+  "Low": "低",
+  "Medium": "中",
+  "High": "高",
   "Faster responses with less reasoning": "响应更快，推理较少",
   "Balanced reasoning and speed": "平衡推理与速度",
   "Maximum reasoning depth": "最大推理深度"

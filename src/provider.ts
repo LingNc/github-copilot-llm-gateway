@@ -203,50 +203,49 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       }
     }
 
-    tooltip.appendMarkdown(`### ${this.getLocalizedString('token.contextWindow')}<br><br>`);
+    tooltip.appendMarkdown(`### ${this.getLocalizedString('token.contextWindow')}\n\n`);
 
     const tokenText = `${this.formatNumber(usedTokens)}/${this.formatNumber(maxTokens)} ${this.getLocalizedString('token.tokens')}`;
     const percentageText = `${percentage}%`;
-    tooltip.appendMarkdown(`${tokenText}  **${percentageText}**<br><br>`);
+    tooltip.appendMarkdown(`${tokenText}  **${percentageText}**\n\n`);
 
     const filled = Math.round((percentage / 100) * 20);
     const empty = 20 - filled;
     // Use VS Code theme blue color for the progress bar
     const barFilled = '█'.repeat(filled);
     const barEmpty = '▒'.repeat(empty);
-    tooltip.appendMarkdown(`<span style="color:var(--vscode-charts-blue)">${barFilled}</span><span style="color:var(--vscode-descriptionForeground)">${barEmpty}</span><br><br>`);
+    tooltip.appendMarkdown(`<span style="color:var(--vscode-charts-blue)">${barFilled}</span><span style="color:var(--vscode-descriptionForeground)">${barEmpty}</span>\n\n`);
 
     // Show reserved tokens for response (similar to Copilot Chat)
     const reservedPercentage = Math.round((reservedTokens / maxTokens) * 100);
-    tooltip.appendMarkdown(`${this.formatNumber(reservedTokens)} ${this.getLocalizedString('token.remainingForResponse')} (${reservedPercentage}%)<br><br>`);
-    tooltip.appendMarkdown(`---<br><br>`);
+    tooltip.appendMarkdown(`${this.formatNumber(reservedTokens)} ${this.getLocalizedString('token.remainingForResponse')} (${reservedPercentage}%)\n\n`);
+
+    // Build categories table
+    const allItems: Array<{ category: string; label: string; percentage: number }> = [];
 
     if (systemItems.length > 0) {
-      tooltip.appendMarkdown(`**${this.getLocalizedString('token.system').toUpperCase()}**<br><br>`);
-      for (const item of systemItems) {
-        const label = item.label.length > 26 ? item.label.substring(0, 23) + '...' : item.label;
-        const usedPercentage = usedTokens > 0 ? Math.round((item.percentage / 100) * (usedTokens / maxTokens) * 100) : 0;
-        tooltip.appendMarkdown(`${label.padEnd(25)} ${usedPercentage.toString().padStart(3)}%<br>`);
-      }
-      tooltip.appendMarkdown(`<br>`);
+      allItems.push(...systemItems.map(item => ({ category: 'System', label: item.label, percentage: item.percentage })));
     }
-
     if (userContextItems.length > 0) {
-      tooltip.appendMarkdown(`**${this.getLocalizedString('token.userContext').toUpperCase()}**<br><br>`);
       // Sort items to ensure consistent order: Messages, Files, Tool Results
       const sortedItems = userContextItems.sort((a, b) => {
         const order = ['Messages', 'Files', 'Tool Results'];
         return order.indexOf(a.label) - order.indexOf(b.label);
       });
-      for (const item of sortedItems) {
-        const label = item.label.length > 25 ? item.label.substring(0, 22) + '...' : item.label;
-        const usedPercentage = usedTokens > 0 ? Math.round((item.percentage / 100) * (usedTokens / maxTokens) * 100) : 0;
-        tooltip.appendMarkdown(`${label.padEnd(25)} ${usedPercentage.toString().padStart(3)}%<br>`);
-      }
-      tooltip.appendMarkdown(`<br>`);
+      allItems.push(...sortedItems.map(item => ({ category: 'User Context', label: item.label, percentage: item.percentage })));
     }
 
-    tooltip.appendMarkdown(`---<br><br>`);
+    if (allItems.length > 0) {
+      tooltip.appendMarkdown(`| Category | Item | % |\n`);
+      tooltip.appendMarkdown(`|:---|:---|---:|\n`);
+      for (const item of allItems) {
+        const usedPercentage = usedTokens > 0 ? Math.round((item.percentage / 100) * (usedTokens / maxTokens) * 100) : 0;
+        tooltip.appendMarkdown(`| ${item.category} | ${item.label} | ${usedPercentage}% |\n`);
+      }
+      tooltip.appendMarkdown(`\n`);
+    }
+
+    tooltip.appendMarkdown(`---\n\n`);
     tooltip.appendMarkdown(`[${this.getLocalizedString('token.compactContext')}](command:github.copilot.llm-gateway.compactContext)`);
 
     this.tokenStatusBarItem.tooltip = tooltip;

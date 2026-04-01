@@ -228,7 +228,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       // System items - show percentage of total context window
       for (const item of systemItems) {
         // item.percentage is percentage of used tokens, convert to percentage of max context
-        const contextPercentage = Math.round((item.percentage / 100) * (usedTokens / maxTokens) * 100);
+        const contextPercentage = ((item.percentage / 100) * (usedTokens / maxTokens) * 100).toFixed(1);
         tooltip.appendMarkdown(`${item.label} ${contextPercentage}%  \n`);
       }
 
@@ -246,7 +246,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           return order.indexOf(a.label) - order.indexOf(b.label);
         });
         for (const item of sortedItems) {
-          const contextPercentage = Math.round((item.percentage / 100) * (usedTokens / maxTokens) * 100);
+          const contextPercentage = ((item.percentage / 100) * (usedTokens / maxTokens) * 100).toFixed(1);
           tooltip.appendMarkdown(`${item.label} ${contextPercentage}%  \n`);
         }
       }

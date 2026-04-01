@@ -140,6 +140,10 @@ Open `settings.json` (`Ctrl+Shift+P` → "Preferences: Open User Settings (JSON)
       "models": {
         "claude-3-7-sonnet-20250219": {
           "name": "Claude 3.7 Sonnet",
+          "modalities": {
+            "input": ["text", "image"],
+            "output": ["text"]
+          },
           "limit": {
             "context": 200000,
             "output": 8192
@@ -150,7 +154,8 @@ Open `settings.json` (`Ctrl+Shift+P` → "Preferences: Open User Settings (JSON)
               "budgetTokens": 16000,
               "effort": "high",
               "levels": ["low", "medium", "high"]
-            }
+            },
+            "temperature": 0.7
           },
           "capabilities": {
             "toolCalling": true,
@@ -167,6 +172,10 @@ Open `settings.json` (`Ctrl+Shift+P` → "Preferences: Open User Settings (JSON)
       "models": {
         "o3-mini": {
           "name": "o3-mini",
+          "modalities": {
+            "input": ["text"],
+            "output": ["text"]
+          },
           "limit": {
             "context": 128000,
             "output": 32768
@@ -176,7 +185,8 @@ Open `settings.json` (`Ctrl+Shift+P` → "Preferences: Open User Settings (JSON)
               "type": "enabled",
               "effort": "medium",
               "levels": ["low", "medium", "high"]
-            }
+            },
+            "temperature": 0.7
           },
           "capabilities": {
             "toolCalling": true,
@@ -193,6 +203,10 @@ Open `settings.json` (`Ctrl+Shift+P` → "Preferences: Open User Settings (JSON)
       "models": {
         "deepseek-reasoner": {
           "name": "DeepSeek Reasoner",
+          "modalities": {
+            "input": ["text"],
+            "output": ["text"]
+          },
           "limit": {
             "context": 64000,
             "output": 8192
@@ -200,7 +214,8 @@ Open `settings.json` (`Ctrl+Shift+P` → "Preferences: Open User Settings (JSON)
           "options": {
             "thinking": {
               "type": "enabled"
-            }
+            },
+            "temperature": 0.7
           },
           "capabilities": {
             "toolCalling": true,
@@ -281,6 +296,10 @@ Your self-hosted models now appear in Copilot Chat. Select one and start coding 
 | `limit.output` | number | Maximum output tokens |
 | `capabilities.toolCalling` | boolean | Enable tool calling |
 | `capabilities.vision` | boolean | Enable vision support |
+| `options.temperature` | number | Sampling temperature (0-2), default: 0.7 |
+| `options.topP` | number | Nucleus sampling (0-1), default: 1.0 |
+| `options.frequencyPenalty` | number | Frequency penalty (-2 to 2), default: 0 |
+| `options.presencePenalty` | number | Presence penalty (-2 to 2), default: 0 |
 | `options.thinking` | object | Thinking mode configuration (see below) |
 
 ### Thinking Configuration

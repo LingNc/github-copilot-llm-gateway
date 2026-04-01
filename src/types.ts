@@ -143,6 +143,30 @@ export interface ThinkingOptions {
  */
 export interface ModelOptions {
   thinking?: ThinkingOptions;
+  /**
+   * Sampling temperature (0-2)
+   * Higher values make output more random, lower values more deterministic
+   * Default: 0.7
+   */
+  temperature?: number;
+  /**
+   * Nucleus sampling parameter (0-1)
+   * An alternative to sampling with temperature
+   * Default: 1.0
+   */
+  topP?: number;
+  /**
+   * Frequency penalty (-2.0 to 2.0)
+   * Reduces repetition by penalizing tokens based on their frequency
+   * Default: 0
+   */
+  frequencyPenalty?: number;
+  /**
+   * Presence penalty (-2.0 to 2.0)
+   * Reduces repetition by penalizing tokens that have appeared
+   * Default: 0
+   */
+  presencePenalty?: number;
 }
 
 /**

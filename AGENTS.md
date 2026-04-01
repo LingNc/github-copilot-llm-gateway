@@ -63,10 +63,11 @@ npm run package
 - [x] Copilot 上下文 token 显示修复（通过 progress.usage() 报告）
 - [x] Claude 3.7 Thinking 内容支持
 - [x] **计划 1**: Token 分类统计完善（Files 和 Tool Results）
-- [ ] **计划 2**: Token 估算算法优化（precise/fast-estimate/none 模式）
-- [ ] **计划 3**: 切换模型时自动隐藏 Token 状态栏
-- [ ] **计划 4**: 模型上下文长度显示异常问题排查
-- [ ] **计划 5**: 整理上下文按钮样式优化
+- [ ] **计划 2**: 后台输出优化（日志级别、美化格式、工具信息简化）
+- [ ] **计划 3**: Token 估算算法优化（precise/fast-estimate/none 模式）
+- [ ] **计划 4**: 切换模型时自动隐藏 Token 状态栏
+- [ ] **计划 5**: 模型上下文长度显示异常问题排查
+- [ ] **计划 6**: 整理上下文按钮样式优化
 - [ ] 完整测试和 bug 修复
 
 ### 未来计划（暂不实装）
@@ -89,7 +90,72 @@ npm run package
 
 ---
 
-#### 计划 2: Token 估算算法优化
+#### 计划 2: 后台输出优化
+
+**目标**: 优化 LLM Gateway 后台输出面板的日志显示，提升可读性和调试效率
+
+**当前问题**:
+1. **工具信息过于冗长**: 发送工具列表时显示完整的工具定义（如 "Tool: get_task_output\n  Description: Get the output of a task..."），占用大量空间且难以快速扫描
+2. **缺乏日志级别区分**: 所有输出混在一起，无法区分 INFO、DEBUG、WARNING、ERROR 等级别
+3. **格式不统一**: 不同部分的输出风格不一致，难以快速定位关键信息
+
+**优化方案**:
+
+1. **简化工具信息显示**
+   - 正常模式: `发送 45 个工具到模型 (parallel: true)`，省略详细工具定义
+   - 详细模式（可配置）: 显示完整工具信息，包括描述和参数
+   - 格式示例:
+     ```
+     [Tools] 发送 45 个工具 (parallel: true)
+     [Tools] 示例: get_task_output, get_terminal_output, run_in_terminal...
+     ```
+
+2. **引入日志级别系统**
+   - 添加配置项 `logLevel`: `'error' | 'warning' | 'info' | 'debug'`
+   - 各级别输出内容:
+     - `error`: 仅错误信息
+     - `warning`: 警告和错误
+     - `info`: 关键流程信息（默认）
+     - `debug`: 详细信息，包括工具定义、Token 计算细节等
+
+3. **统一输出格式**
+   - 使用标签前缀区分类型:
+     - `[Request]` - 请求相关
+     - `[Response]` - 响应相关
+     - `[Token]` - Token 统计
+     - `[Tool]` - 工具调用
+     - `[Config]` - 配置信息
+     - `[Error]` - 错误信息
+   - 关键信息高亮（使用 VS Code 主题色）
+   - 时间戳可选显示
+
+4. **可折叠/展开的长内容**
+   - 对于请求体、响应体等长内容，使用折叠格式显示
+   - 示例:
+     ```
+     [Request] POST /v1/chat/completions (展开 ▼)
+     ```
+
+**配置示例**:
+```json
+{
+  "github.copilot.llm-gateway.logLevel": "info",
+  "github.copilot.llm-gateway.showTimestamps": true,
+  "github.copilot.llm-gateway.detailedToolInfo": false
+}
+```
+
+**实现位置**:
+- `src/provider.ts`: 所有 `this.outputChannel.appendLine()` 调用
+- `src/extension.ts`: 初始化日志配置
+
+**预估工作量**: 3-4 小时
+
+**优先级**: 中（提升开发调试体验）
+
+---
+
+#### 计划 3: Token 估算算法优化
 
 **目标**: 提供可配置的 Token 计算模式，平衡精确度和性能
 
@@ -128,7 +194,7 @@ npm run package
 
 ---
 
-#### 计划 3: 切换模型时自动隐藏 Token 状态栏
+#### 计划 4: 切换模型时自动隐藏 Token 状态栏
 
 **需求描述**: 当用户在 Copilot Chat 中切换到非 LLM Gateway 提供的模型时，自动隐藏当前显示的 Token 状态栏
 
@@ -158,7 +224,7 @@ npm run package
 
 ---
 
-#### 计划 4: 模型上下文长度显示异常问题排查
+#### 计划 5: 模型上下文长度显示异常问题排查
 
 **问题描述**: 在 Copilot Chat 模型选择界面中，LLM Gateway 配置的模型上下文长度显示比实际值偏大
 - 示例 1: 实际 1M (1,000,000) → 显示 1.1M
@@ -187,7 +253,7 @@ npm run package
 
 ---
 
-#### 计划 5: 整理上下文按钮样式优化
+#### 计划 6: 整理上下文按钮样式优化
 
 **当前状态**:
 当前 tooltip 底部的"整理对话上下文"显示为 Markdown 超链接 `[整理对话上下文](command:...)`

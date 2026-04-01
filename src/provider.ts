@@ -1006,9 +1006,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
       // Map effort levels to localized labels and descriptions
       const levelLabels: Record<string, string> = {
-        low: vscode.l10n.t('Low'),
-        medium: vscode.l10n.t('Medium'),
-        high: vscode.l10n.t('High'),
+        low: 'Low',
+        medium: 'Medium',
+        high: 'High',
       };
 
       return {

@@ -397,25 +397,28 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       this.outputChannel.appendLine(`  Message role=${role}, contentTypes=[${contentTypes.join(', ')}], contentCount=${msg.content.length}`);
 
       for (const part of msg.content) {
+        // Debug: log part types to understand file handling
+        this.outputChannel.appendLine(`    Part type: ${part.constructor.name}, mimeType: ${(part as any).mimeType || 'N/A'}`);
+
         if (part instanceof vscode.LanguageModelTextPart) {
           contentParts.push({ type: 'text', text: part.value });
           // Count as messages (this includes regular text and file references)
           messagesTokens += await this.provideTokenCount(model, part.value, token);
         } else if (part instanceof vscode.LanguageModelDataPart) {
-          // Handle image data - count as files
+          // Handle file data (images and other binary data)
+          const base64Data = Buffer.from(part.data).toString('base64');
           if (part.mimeType.startsWith('image/')) {
-            const base64Data = Buffer.from(part.data).toString('base64');
             const imageUrl = `data:${part.mimeType};base64,${base64Data}`;
             contentParts.push({ type: 'image_url', image_url: { url: imageUrl } });
             this.outputChannel.appendLine(`  Added image: ${part.mimeType}, ${part.data.length} bytes`);
-            // Count image data as files
-            filesTokens += await this.provideTokenCount(model, base64Data, token);
           } else {
-            // Handle other binary data as text
+            // Handle other file types as text content
             const text = Buffer.from(part.data).toString('utf-8');
             contentParts.push({ type: 'text', text });
-            messagesTokens += await this.provideTokenCount(model, text, token);
+            this.outputChannel.appendLine(`  Added file: ${part.mimeType}, ${part.data.length} bytes`);
           }
+          // Count all file data (images and other files) as filesTokens
+          filesTokens += await this.provideTokenCount(model, base64Data, token);
         } else if (part instanceof vscode.LanguageModelToolResultPart) {
           const toolResult = this.convertToolResultPart(part);
           toolResults.push(toolResult);
@@ -1748,9 +1751,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           }
 
           // Handle reasoning_content (thinking) from OpenAI-compatible APIs (e.g., DeepSeek, Qwen)
+          // Store thinking content internally but don't expose to user
           if (chunk.reasoning) {
             totalContent += chunk.reasoning;
-            progress.report(new vscode.LanguageModelTextPart(chunk.reasoning));
+            // Not reporting reasoning content to avoid exposing internal thinking
           }
 
           // Capture usage data if provided by API
@@ -1850,6 +1854,19 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         } else {
           this.outputChannel.appendLine(`Token usage tracking: prompt=${promptTokens}, completion=${completionTokens}`);
         }
+
+        // Update status bar after conversation completes
+        const totalTokens = promptTokens + completionTokens;
+        this.currentSessionPromptTokens = promptTokens;
+        this.currentSessionCompletionTokens = completionTokens;
+        // Calculate reserved tokens for next response
+        const modelMaxContext = resolvedModel?.limit.context ?? this.gatewayConfig.defaultMaxTokens;
+        const desiredOutputTokens = Math.min(
+          resolvedModel?.limit.output ?? this.gatewayConfig.defaultMaxOutputTokens,
+          Math.floor(modelMaxContext / 2)
+        );
+        const reservedForNext = Math.max(64, desiredOutputTokens - completionTokens);
+        this.updateTokenStatusBar(totalTokens, modelMaxContext, reservedForNext);
       }
 
       if (totalContent.length === 0 && totalToolCalls === 0) {

@@ -42,6 +42,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   private currentSessionCompletionTokens = 0;
   // Cache debug logs setting to avoid repeated config lookups
   private debugLogsEnabled = false;
+  private tokenDebugLogsEnabled = false;
   // Status bar item for token usage display
   private tokenStatusBarItem: vscode.StatusBarItem | undefined;
   // Current session token statistics
@@ -299,6 +300,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   private updateDebugSettings(): void {
     const config = vscode.workspace.getConfiguration('github.copilot.llm-gateway');
     this.debugLogsEnabled = config.get<boolean>('enableDebugLogs', false);
+    this.tokenDebugLogsEnabled = config.get<boolean>('enableTokenDebugLogs', false);
   }
 
   /**
@@ -1742,8 +1744,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       }
     }
 
-    // Log call details with stack trace to debug frequent calls (only if debug enabled)
-    if (this.debugLogsEnabled) {
+    // Log call details with stack trace to debug frequent calls (only if token debug enabled)
+    if (this.tokenDebugLogsEnabled) {
       const stack = new Error().stack?.split('\n').slice(3, 6).join(' | ') || 'no stack';
       this.outputChannel.appendLine(`[TokenCount #${this.tokenCountCallCount}] len=${content.length} | ${stack}`);
     }
@@ -1759,14 +1761,14 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       if (this.tiktokenEncoder) {
         const tokens = this.tiktokenEncoder.encode(content);
         const count = tokens.length;
-        if (this.debugLogsEnabled) {
+        if (this.tokenDebugLogsEnabled) {
           this.outputChannel.appendLine(`  -> tiktoken: ${count} tokens`);
         }
         return count;
       } else {
         // Fallback if encoder failed to load
         const count = Math.ceil(content.length / 4);
-        if (this.debugLogsEnabled) {
+        if (this.tokenDebugLogsEnabled) {
           this.outputChannel.appendLine(`  -> fallback: ${count} tokens`);
         }
         return count;
@@ -1774,7 +1776,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     } catch (error) {
       // Fallback to character-based estimation
       const count = Math.ceil(content.length / 4);
-      if (this.debugLogsEnabled) {
+      if (this.tokenDebugLogsEnabled) {
         this.outputChannel.appendLine(`  -> fallback(error): ${count} tokens`);
       }
       return count;

@@ -207,7 +207,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     tooltip.appendMarkdown(`### ${this.getLocalizedString('token.contextWindow')}\n\n`);
 
     const tokenText = `${this.formatNumber(usedTokens)}/${this.formatNumber(maxTokens)} ${this.getLocalizedString('token.tokens')}`;
-    const percentageText = `${percentage}%`;
+    const percentageText = `${percentage.toFixed(1)}%`;
     tooltip.appendMarkdown(`${tokenText}  **${percentageText}**\n\n`);
 
     const filled = Math.round((percentage / 100) * 20);
@@ -218,7 +218,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     tooltip.appendMarkdown(`<span style="color:var(--vscode-charts-blue)">${barFilled}</span><span style="color:var(--vscode-descriptionForeground)">${barEmpty}</span>\n\n`);
 
     // Show reserved tokens for response (similar to Copilot Chat)
-    const reservedPercentage = Math.round((reservedTokens / maxTokens) * 100);
+    const reservedPercentage = ((reservedTokens / maxTokens) * 100).toFixed(1);
     tooltip.appendMarkdown(`${this.formatNumber(reservedTokens)} ${this.getLocalizedString('token.remainingForResponse')} (${reservedPercentage}%)\n\n`);
 
     // Build categories list (vertical layout like Copilot Chat)

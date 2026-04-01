@@ -1717,10 +1717,11 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           }
 
           // Handle thinking content from Claude 3.7+
+          // Thinking content is stored but not directly reported to avoid cluttering the output
           if (chunk.thinking) {
             totalContent += chunk.thinking;
-            // Report thinking as text content since LanguageModelThinkingPart may not be available
-            progress.report(new vscode.LanguageModelTextPart(chunk.thinking));
+            // Optionally log thinking content for debugging
+            // this.outputChannel.appendLine(`[Thinking] ${chunk.thinking.substring(0, 100)}...`);
           }
 
           // Capture usage data (Anthropic usually provides this)

@@ -1878,6 +1878,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         );
         const reservedForNext = Math.max(64, desiredOutputTokens - completionTokens);
         // Use saved details to preserve category breakdown
+        this.outputChannel.appendLine(`[Token Debug] Before update: estimated=${estimatedInputTokens}, API returned prompt=${promptTokens}, completion=${completionTokens}, total=${totalTokens}`);
         this.updateTokenStatusBar(totalTokens, modelMaxContext, reservedForNext, this.currentTokenDetails);
       }
 

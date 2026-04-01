@@ -1574,28 +1574,21 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     const hasTools = (modelCapabilities?.toolCalling ?? this.gatewayConfig.enableToolCalling) &&
                      options.tools && options.tools.length > 0;
 
-    // Determine temperature:
-    // 1. Model-specific config (highest priority)
-    // 2. Tool mode: use agentTemperature
-    // 3. Default: 0.7
-    let temperature: number;
-    if (resolvedModel?.options?.temperature !== undefined) {
-      temperature = resolvedModel.options.temperature;
-    } else if (hasTools) {
-      temperature = this.gatewayConfig.agentTemperature ?? 0;
-    } else {
-      temperature = 0.7;
-    }
-
     const requestOptions: Record<string, unknown> = {
       model: model.id,
       messages: truncatedMessages,
       max_tokens: safeMaxOutputTokens,
-      temperature,
     };
 
-    // Add optional sampling parameters ONLY if explicitly configured
-    // Leave unset to let server use its own defaults
+    // Add sampling parameters ONLY if explicitly configured
+    // Temperature: use model config > tool mode default, or don't send if neither
+    if (resolvedModel?.options?.temperature !== undefined) {
+      requestOptions.temperature = resolvedModel.options.temperature;
+    } else if (hasTools) {
+      requestOptions.temperature = this.gatewayConfig.agentTemperature ?? 0;
+    }
+    // If neither configured, don't send temperature (let server use default)
+
     if (resolvedModel?.options?.topP !== undefined) {
       requestOptions.top_p = resolvedModel.options.topP;
     }

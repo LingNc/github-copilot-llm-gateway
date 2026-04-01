@@ -1573,7 +1573,19 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     // Build request
     const hasTools = (modelCapabilities?.toolCalling ?? this.gatewayConfig.enableToolCalling) &&
                      options.tools && options.tools.length > 0;
-    const temperature = hasTools ? (this.gatewayConfig.agentTemperature ?? 0) : 0.7;
+
+    // Determine temperature:
+    // 1. Model-specific config (highest priority)
+    // 2. Tool mode: use agentTemperature
+    // 3. Default: 0.7
+    let temperature: number;
+    if (resolvedModel?.options?.temperature !== undefined) {
+      temperature = resolvedModel.options.temperature;
+    } else if (hasTools) {
+      temperature = this.gatewayConfig.agentTemperature ?? 0;
+    } else {
+      temperature = 0.7;
+    }
 
     const requestOptions: Record<string, unknown> = {
       model: model.id,
@@ -1581,6 +1593,17 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       max_tokens: safeMaxOutputTokens,
       temperature,
     };
+
+    // Add optional sampling parameters if configured
+    if (resolvedModel?.options?.topP !== undefined) {
+      requestOptions.top_p = resolvedModel.options.topP;
+    }
+    if (resolvedModel?.options?.frequencyPenalty !== undefined) {
+      requestOptions.frequency_penalty = resolvedModel.options.frequencyPenalty;
+    }
+    if (resolvedModel?.options?.presencePenalty !== undefined) {
+      requestOptions.presence_penalty = resolvedModel.options.presencePenalty;
+    }
 
     const toolsConfig = this.buildToolsConfig(options, modelCapabilities);
     if (toolsConfig) {

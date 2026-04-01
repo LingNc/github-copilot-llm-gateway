@@ -270,6 +270,11 @@ export class AnthropicClient {
       stream: true,
     };
 
+    // Add optional parameters if provided
+    if (request.top_p !== undefined) {
+      anthropicRequest.top_p = request.top_p;
+    }
+
     if (request.tools && request.tools.length > 0) {
       anthropicRequest.tools = this.convertTools(request.tools);
       if (request.tool_choice) {

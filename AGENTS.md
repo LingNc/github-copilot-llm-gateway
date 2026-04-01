@@ -63,6 +63,9 @@ npm run package
 - [x] Copilot 上下文 token 显示修复（通过 progress.usage() 报告）
 - [x] Claude 3.7 Thinking 内容支持
 - [x] **计划 1**: Token 分类统计完善（Files 和 Tool Results）
+- [x] **问题修复**: 思考等级本地化（使用英文原文作为l10n key）
+- [x] **问题修复**: config-priority模式优化（有配置时跳过API请求）
+- [ ] **问题排查**: 模型重复显示（VS Code/Copilot缓存问题）
 - [ ] **计划 2**: 后台输出优化（日志级别、美化格式、工具信息简化）
 - [ ] **计划 3**: Token 估算算法优化（precise/fast-estimate/none 模式）
 - [ ] **计划 4**: 切换模型时自动隐藏 Token 状态栏
@@ -281,6 +284,65 @@ npm run package
 **预估工作量**: 1-2 小时
 
 **优先级**: 低（UI 美化）
+
+---
+
+### 已知问题
+
+#### 模型重复显示问题
+
+**症状**: 在模型选择器中，每个模型显示两次
+
+**分析**:
+- 在全新 VS Code 实例（其他电脑）上测试正常，说明扩展代码本身无重复
+- 问题仅在当前 VS Code 实例出现，可能是 VS Code 或 Copilot Chat 内部缓存导致
+- 日志显示每次调用返回的模型数量正确，无重复 ID
+
+**解决方案**:
+1. **清除 Copilot Chat 缓存**（最有效）：
+   ```bash
+   # 关闭 VS Code
+   rm -rf ~/.vscode-server/data/User/globalStorage/github.copilot-chat/*
+   rm -rf ~/.vscode-server/data/CachedExtensionVSIXs/*copilot*
+   # 重新启动 VS Code
+   ```
+
+2. **清除 VS Code 工作区缓存**：
+   ```bash
+   rm -rf ~/.vscode-server/data/User/workspaceStorage/*/state.vscdb
+   rm -rf ~/.vscode-server/data/User/workspaceStorage/*/state.vscdb.backup
+   ```
+
+3. **完全重装扩展**：
+   ```bash
+   # 在 VS Code 中卸载 LLM Gateway 扩展
+   # 删除所有残留文件
+   rm -rf ~/.vscode-server/extensions/andrewbutson.github-copilot-llm-gateway-*
+   rm -rf ~/.vscode-server/data/CachedExtensionVSIXs/andrewbutson.github-copilot-llm-gateway-*
+   # 重启 VS Code，重新安装扩展
+   ```
+
+---
+
+#### l10n 本地化问题（已修复）
+
+**问题**: `vscode.l10n.t()` 显示翻译 key 而不是实际文本
+
+**原因**: 参考 Copilot Chat 源码发现，l10n 应该使用英文原文作为 key，而不是 dot-notation key
+
+**修复**:
+- 代码中：`vscode.l10n.t('Thinking Effort')`（英文原文）
+- package.nls.json: `"Thinking Effort": "Thinking Effort"`
+- package.nls.zh-cn.json: `"Thinking Effort": "思考等级"`
+
+---
+
+### 扩展依赖
+
+**GitHub Copilot Chat**: 本扩展依赖 Copilot Chat 扩展提供的基础功能
+- 安装本扩展前需先安装 GitHub Copilot Chat
+- 卸载 Copilot Chat 时连带卸载本扩展
+- 在 `package.json` 中声明为 `extensionDependencies`
 
 ---
 

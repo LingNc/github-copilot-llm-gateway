@@ -1004,11 +1004,15 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         ? thinking.effort
         : effortLevels[0];
 
-      // Filter descriptions based on available levels
+      // Get VS Code language
+      const vscodeLang = vscode.env.language;
+      const isZh = vscodeLang.startsWith('zh');
+
+      // Filter descriptions based on available levels and language
       const levelDescriptions: Record<string, string> = {
-        low: vscode.l10n.t('Faster responses with less reasoning'),
-        medium: vscode.l10n.t('Balanced reasoning and speed'),
-        high: vscode.l10n.t('Maximum reasoning depth'),
+        low: isZh ? '响应更快，推理较少' : 'Faster responses with less reasoning',
+        medium: isZh ? '平衡推理与速度' : 'Balanced reasoning and speed',
+        high: isZh ? '最大推理深度' : 'Maximum reasoning depth',
       };
 
       // Map effort levels to localized labels and descriptions
@@ -1022,7 +1026,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         properties: {
           reasoningEffort: {
             type: 'string',
-            title: vscode.l10n.t('Thinking Effort'),
+            title: isZh ? '思考等级' : 'Thinking Effort',
             enum: effortLevels,
             enumItemLabels: effortLevels.map(level => levelLabels[level] || level.charAt(0).toUpperCase() + level.slice(1)),
             enumDescriptions: effortLevels.map(level => levelDescriptions[level] || level),

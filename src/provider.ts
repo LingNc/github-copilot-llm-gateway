@@ -94,17 +94,23 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     const tokenStatisticsEnabled = config.get<boolean>('enableTokenStatistics', true);
 
     if (tokenStatisticsEnabled) {
-      this.tokenStatusBarItem = vscode.window.createStatusBarItem(
-        vscode.StatusBarAlignment.Right,
-        100
-      );
-      // Click has visual feedback but tooltip immediately reappears
-      // This mimics Copilot Chat's behavior where clicking doesn't disrupt the UX
-      this.tokenStatusBarItem.command = 'github.copilot.llm-gateway.statusBarNoOp';
-      context.subscriptions.push(this.tokenStatusBarItem);
-      // Initialize with default text and show
-      this.tokenStatusBarItem.text = '$(symbol-keyword) 0%';
-      this.tokenStatusBarItem.show();
+      // Only create if not already exists
+      if (!this.tokenStatusBarItem) {
+        this.tokenStatusBarItem = vscode.window.createStatusBarItem(
+          vscode.StatusBarAlignment.Right,
+          100
+        );
+        // Click has visual feedback but tooltip immediately reappears
+        // This mimics Copilot Chat's behavior where clicking doesn't disrupt the UX
+        this.tokenStatusBarItem.command = 'github.copilot.llm-gateway.statusBarNoOp';
+        context.subscriptions.push(this.tokenStatusBarItem);
+      }
+      this.updateStatusBarVisibility();
+    } else {
+      // Hide if disabled
+      if (this.tokenStatusBarItem) {
+        this.tokenStatusBarItem.hide();
+      }
     }
   }
 

@@ -3,6 +3,7 @@ import { ProviderManager } from './manager';
 import { ConfigManager } from './config/ConfigManager';
 import { registerConfigCommands } from './commands';
 import { TokenUsageViewProvider } from './views/TokenUsageView';
+import { LogService } from './services/LogService';
 
 /**
  * Extension activation
@@ -13,8 +14,22 @@ export async function activate(context: vscode.ExtensionContext) {
   const outputChannel = vscode.window.createOutputChannel('GitHub Copilot LLM Gateway');
   outputChannel.appendLine('Extension activating...');
 
+  // Initialize LogService with configuration
+  const config = vscode.workspace.getConfiguration('github.copilot.llm-gateway');
+  const logLevel = config.get<string>('logLevel', 'info');
+  const logShowTimestamp = config.get<boolean>('logShowTimestamp', false);
+  const logDetailedToolInfo = config.get<boolean>('logDetailedToolInfo', false);
+
+  const logService = new LogService(outputChannel, {
+    level: logLevel as 'error' | 'warning' | 'info' | 'debug',
+    showTimestamp: logShowTimestamp,
+    detailedToolInfo: logDetailedToolInfo,
+  });
+
+  logService.info('Config', 'Extension activating...');
+
   // Create ProviderManager
-  const providerManager = new ProviderManager(context, outputChannel);
+  const providerManager = new ProviderManager(context, outputChannel, logService);
 
   // Initialize and register all providers
   await providerManager.initialize();

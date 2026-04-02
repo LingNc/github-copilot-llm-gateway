@@ -7,6 +7,12 @@ export interface OpenAIModel {
   object: string;
   created: number;
   owned_by: string;
+  // Extended fields from some API providers (e.g., Moonshot)
+  display_name?: string;
+  context_length?: number;
+  supports_reasoning?: boolean;
+  supports_image_in?: boolean;
+  supports_video_in?: boolean;
 }
 
 export interface OpenAIModelsResponse {
@@ -120,11 +126,22 @@ export interface ModelModalities {
 }
 
 /**
- * Thinking/ReasOning configuration
+ * Thinking/Reasoning configuration
  */
 export interface ThinkingOptions {
   type: 'enabled' | 'disabled';
   budgetTokens?: number;
+  /**
+   * Default reasoning effort level
+   * Values: 'low', 'medium', 'high'
+   */
+  effort?: 'low' | 'medium' | 'high';
+  /**
+   * Available thinking effort levels for model picker dropdown
+   * If not specified, defaults to ['low', 'medium', 'high']
+   * Example: ['low', 'high'] for models that only support two levels
+   */
+  levels?: ('low' | 'medium' | 'high')[];
 }
 
 /**
@@ -132,6 +149,30 @@ export interface ThinkingOptions {
  */
 export interface ModelOptions {
   thinking?: ThinkingOptions;
+  /**
+   * Sampling temperature (0-2)
+   * Higher values make output more random, lower values more deterministic
+   * Default: 0.7
+   */
+  temperature?: number;
+  /**
+   * Nucleus sampling parameter (0-1)
+   * An alternative to sampling with temperature
+   * Default: 1.0
+   */
+  topP?: number;
+  /**
+   * Frequency penalty (-2.0 to 2.0)
+   * Reduces repetition by penalizing tokens based on their frequency
+   * Default: 0
+   */
+  frequencyPenalty?: number;
+  /**
+   * Presence penalty (-2.0 to 2.0)
+   * Reduces repetition by penalizing tokens that have appeared
+   * Default: 0
+   */
+  presencePenalty?: number;
 }
 
 /**

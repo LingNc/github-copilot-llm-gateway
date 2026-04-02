@@ -1,0 +1,203 @@
+{
+    "github.copilot.llm-gateway.providers": {
+        "bailian": {
+            "name": "Bailian",
+            "baseURL": "https://coding.dashscope.aliyuncs.com/v1",
+            "apiKey": "sk-sp-d2bace425c804d89ae32af06a5d8f4d7",
+            "models": {
+                "qwen3.5-plus": {
+                    "name": "Qwen3.5 Plus",
+                    "modalities": {
+                        "input": [
+                            "text",
+                            "image"
+                        ],
+                        "output": [
+                            "text"
+                        ]
+                    },
+                    "options": {
+                        "thinking": {
+                            "type": "enabled",
+                            "budgetTokens": 8192
+                        }
+                    },
+                    "limit": {
+                        "context": 1000000,
+                        "output": 65536
+                    },
+                    "capabilities": {
+                        "toolCalling": true,
+                        "vision": true
+                    }
+                },
+                "qwen3-max-2026-01-23": {
+                    "name": "Qwen3 Max 2026-01-23",
+                    "modalities": {
+                        "input": [
+                            "text"
+                        ],
+                        "output": [
+                            "text"
+                        ]
+                    },
+                    "limit": {
+                        "context": 262144,
+                        "output": 32768
+                    },
+                    "capabilities": {
+                        "toolCalling": true,
+                        "vision": false
+                    }
+                },
+                "qwen3-coder-next": {
+                    "name": "Qwen3 Coder Next",
+                    "modalities": {
+                        "input": [
+                            "text"
+                        ],
+                        "output": [
+                            "text"
+                        ]
+                    },
+                    "limit": {
+                        "context": 262144,
+                        "output": 65536
+                    },
+                    "capabilities": {
+                        "toolCalling": true,
+                        "vision": false
+                    }
+                },
+                "qwen3-coder-plus": {
+                    "name": "Qwen3 Coder Plus",
+                    "modalities": {
+                        "input": [
+                            "text"
+                        ],
+                        "output": [
+                            "text"
+                        ]
+                    },
+                    "limit": {
+                        "context": 1000000,
+                        "output": 65536
+                    },
+                    "capabilities": {
+                        "toolCalling": true,
+                        "vision": false
+                    }
+                },
+                "MiniMax-M2.5": {
+                    "name": "MiniMax M2.5",
+                    "modalities": {
+                        "input": [
+                            "text"
+                        ],
+                        "output": [
+                            "text"
+                        ]
+                    },
+                    "options": {
+                        "thinking": {
+                            "type": "enabled",
+                            "budgetTokens": 8192
+                        }
+                    },
+                    "limit": {
+                        "context": 196608,
+                        "output": 24576
+                    },
+                    "capabilities": {
+                        "toolCalling": true,
+                        "vision": false
+                    }
+                },
+                "glm-5": {
+                    "name": "GLM-5",
+                    "modalities": {
+                        "input": [
+                            "text"
+                        ],
+                        "output": [
+                            "text"
+                        ]
+                    },
+                    "options": {
+                        "thinking": {
+                            "type": "enabled",
+                            "budgetTokens": 8192
+                        }
+                    },
+                    "limit": {
+                        "context": 202752,
+                        "output": 16384
+                    },
+                    "capabilities": {
+                        "toolCalling": true,
+                        "vision": false
+                    }
+                },
+                "glm-4.7": {
+                    "name": "GLM-4.7",
+                    "modalities": {
+                        "input": [
+                            "text"
+                        ],
+                        "output": [
+                            "text"
+                        ]
+                    },
+                    "options": {
+                        "thinking": {
+                            "type": "enabled",
+                            "budgetTokens": 8192
+                        }
+                    },
+                    "limit": {
+                        "context": 202752,
+                        "output": 16384
+                    },
+                    "capabilities": {
+                        "toolCalling": true,
+                        "vision": false
+                    }
+                },
+                "kimi-k2.5": {
+                    "name": "Kimi K2.5",
+                    "modalities": {
+                        "input": [
+                            "text",
+                            "image"
+                        ],
+                        "output": [
+                            "text"
+                        ]
+                    },
+                    "options": {
+                        "thinking": {
+                            "type": "enabled",
+                            "budgetTokens": 8192,
+                            "effort": "medium",
+                            "levels": [
+                                "low",
+                                "medium",
+                                "high"
+                            ]
+                        },
+                        "temperature": 1.0
+                    },
+                    "limit": {
+                        "context": 262144,
+                        "output": 32768
+                    },
+                    "capabilities": {
+                        "toolCalling": true,
+                        "vision": true
+                    }
+                }
+            }
+        }
+    },
+    "github.copilot.llm-gateway.configMode": "config-only"
+}

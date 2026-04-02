@@ -219,6 +219,11 @@ async function removeProviderInteractive(configManager: ConfigManager): Promise<
  * Interactive add models to provider
  */
 async function addModelsInteractive(providerConfig: ProviderConfig): Promise<void> {
+  // Ensure models object exists
+  if (!providerConfig.models) {
+    providerConfig.models = {};
+  }
+
   while (true) {
     const modelId = await vscode.window.showInputBox({
       prompt: 'Enter model ID (or Cancel to finish)',

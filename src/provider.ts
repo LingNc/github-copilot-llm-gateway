@@ -48,6 +48,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   // Current session token statistics
   private currentContextTokens = 0;
   private currentModelMaxTokens = 0;
+  private currentTokenDetails?: Array<{ category: string; label: string; percentage: number }>;
   // Token usage view provider
   private tokenUsageProvider?: TokenUsageViewProvider;
 
@@ -92,7 +93,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         vscode.StatusBarAlignment.Right,
         100
       );
-      this.tokenStatusBarItem.command = undefined;
+      // Click has visual feedback but tooltip immediately reappears
+      // This mimics Copilot Chat's behavior where clicking doesn't disrupt the UX
+      this.tokenStatusBarItem.command = 'github.copilot.llm-gateway.statusBarNoOp';
       context.subscriptions.push(this.tokenStatusBarItem);
       this.updateStatusBarVisibility();
     }
@@ -176,10 +179,19 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     this.currentModelMaxTokens = maxTokens;
 
     const percentage = Math.round((usedTokens / maxTokens) * 100);
-    // Status bar color: green (safe), yellow (warning), red (critical)
-    const color = percentage > 90 ? new vscode.ThemeColor('statusBarItem.errorForeground')
-      : percentage > 70 ? new vscode.ThemeColor('statusBarItem.warningForeground')
-      : '#6bcf7f'; // Green for safe usage
+    // Status bar color: green (<50%), yellow (50-80%), red (>80%)
+    // MODIFY HERE: Change these colors as needed
+    let color: string | vscode.ThemeColor | undefined;
+    if (percentage > 80) {
+      // HIGH USAGE: Red color - modify this hex color if needed
+      color = '#f44336';
+    } else if (percentage >= 50) {
+      // MEDIUM USAGE: Yellow/Orange color - modify this hex color if needed
+      color = '#ff9800';
+    } else {
+      // LOW USAGE: Green color - modify this hex color if needed
+      color = '#6bcf7f';
+    }
 
     this.tokenStatusBarItem.text = `$(symbol-keyword) ${percentage}%`;
     this.tokenStatusBarItem.color = color;
@@ -286,6 +298,20 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     await vscode.commands.executeCommand('workbench.panel.chat.view.copilot.focus');
     await vscode.commands.executeCommand('type', { text: '/compact' });
     await vscode.commands.executeCommand('workbench.action.chat.submit');
+  }
+
+  /**
+   * Show token usage information when clicking status bar
+   * Opens the Token Usage view panel
+   */
+  public async showTokenUsage(): Promise<void> {
+    if (this.currentContextTokens === 0) {
+      vscode.window.showInformationMessage('No active session');
+      return;
+    }
+
+    // Focus the token usage view
+    await vscode.commands.executeCommand('llmGateway.tokenUsage.focus');
   }
 
   /**
@@ -397,24 +423,32 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       this.outputChannel.appendLine(`  Message role=${role}, contentTypes=[${contentTypes.join(', ')}], contentCount=${msg.content.length}`);
 
       for (const part of msg.content) {
+        // Debug: log part types to understand file handling
+        this.outputChannel.appendLine(`    Part type: ${part.constructor.name}, mimeType: ${(part as any).mimeType || 'N/A'}`);
+
         if (part instanceof vscode.LanguageModelTextPart) {
           contentParts.push({ type: 'text', text: part.value });
           // Count as messages (this includes regular text and file references)
           messagesTokens += await this.provideTokenCount(model, part.value, token);
         } else if (part instanceof vscode.LanguageModelDataPart) {
-          // Handle image data - count as files
+          // Handle file data (images and other binary data)
           if (part.mimeType.startsWith('image/')) {
             const base64Data = Buffer.from(part.data).toString('base64');
             const imageUrl = `data:${part.mimeType};base64,${base64Data}`;
             contentParts.push({ type: 'image_url', image_url: { url: imageUrl } });
             this.outputChannel.appendLine(`  Added image: ${part.mimeType}, ${part.data.length} bytes`);
-            // Count image data as files
-            filesTokens += await this.provideTokenCount(model, base64Data, token);
+            // Calculate image tokens based on dimensions
+            const estimatedImageTokens = this.calculateImageTokens(part.data, part.mimeType);
+            filesTokens += estimatedImageTokens;
+            this.outputChannel.appendLine(`  Estimated image tokens: ${estimatedImageTokens}`);
           } else {
-            // Handle other binary data as text
+            // Handle other file types as text content
             const text = Buffer.from(part.data).toString('utf-8');
             contentParts.push({ type: 'text', text });
-            messagesTokens += await this.provideTokenCount(model, text, token);
+            this.outputChannel.appendLine(`  Added file: ${part.mimeType}, ${part.data.length} bytes`);
+            // Count file content tokens
+            const fileTokens = await this.provideTokenCount(model, text, token);
+            filesTokens += fileTokens;
           }
         } else if (part instanceof vscode.LanguageModelToolResultPart) {
           const toolResult = this.convertToolResultPart(part);
@@ -871,7 +905,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       this.outputChannel.appendLine(`  Provider "${provider.id}": ${modelCount} model(s), baseURL=${provider.baseURL}`);
     }
 
-    for (const provider of providers) {
+    // Fetch models from all providers in parallel for better performance
+    const fetchPromises = providers.map(async (provider) => {
       try {
         const providerModels = await this.fetchModelsForProvider(
           provider.id,
@@ -881,14 +916,33 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           options,
           token
         );
-        allModels.push(...providerModels);
+        // Log model IDs with their source for debugging duplicates
+        this.outputChannel.appendLine(`  Provider "${provider.id}" returned models: [${providerModels.map(m => m.id).join(', ')}]`);
+        return providerModels;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         this.outputChannel.appendLine(`Failed to fetch models from provider "${provider.id}": ${message}`);
+        return [];
       }
+    });
+
+    const results = await Promise.all(fetchPromises);
+    for (const providerModels of results) {
+      allModels.push(...providerModels);
     }
 
     this.outputChannel.appendLine(`Found ${allModels.length} model(s) from all providers`);
+
+    // Check for duplicate model IDs
+    const idCounts = new Map<string, number>();
+    for (const model of allModels) {
+      idCounts.set(model.id, (idCounts.get(model.id) || 0) + 1);
+    }
+    const duplicates = Array.from(idCounts.entries()).filter(([_, count]) => count > 1);
+    if (duplicates.length > 0) {
+      this.outputChannel.appendLine(`WARNING: Found duplicate model IDs: ${duplicates.map(([id, count]) => `${id}(${count})`).join(', ')}`);
+    }
+
     return allModels;
   }
 
@@ -925,6 +979,70 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   }
 
   /**
+   * Build configuration schema for model picker (e.g., thinking effort selector)
+   * Reference: Copilot Chat's buildConfigurationSchema implementation
+   *
+   * Logic:
+   * - If thinking.type !== 'enabled': no thinking configuration shown
+   * - If thinking.levels is defined: show dropdown with specified levels
+   * - If thinking.type === 'enabled' but no levels: enable thinking without dropdown
+   */
+  private buildConfigurationSchema(
+    model: ResolvedModel
+  ): vscode.LanguageModelConfigurationSchema | undefined {
+    const thinking = model.options?.thinking;
+
+    // If thinking is not enabled, return undefined
+    if (!thinking || thinking.type !== 'enabled') {
+      return undefined;
+    }
+
+    // If levels is specified, show dropdown in model picker
+    if (thinking.levels && thinking.levels.length > 0) {
+      const effortLevels = thinking.levels;
+      const defaultEffort = thinking.effort && effortLevels.includes(thinking.effort)
+        ? thinking.effort
+        : effortLevels[0];
+
+      // Get VS Code language
+      const vscodeLang = vscode.env.language;
+      const isZh = vscodeLang.startsWith('zh');
+
+      // Filter descriptions based on available levels and language
+      const levelDescriptions: Record<string, string> = {
+        low: isZh ? '响应更快，推理较少' : 'Faster responses with less reasoning',
+        medium: isZh ? '平衡推理与速度' : 'Balanced reasoning and speed',
+        high: isZh ? '最大推理深度' : 'Maximum reasoning depth',
+      };
+
+      // Map effort levels to localized labels and descriptions
+      const levelLabels: Record<string, string> = {
+        low: 'Low',
+        medium: 'Medium',
+        high: 'High',
+      };
+
+      return {
+        properties: {
+          reasoningEffort: {
+            type: 'string',
+            title: isZh ? '思考等级' : 'Thinking Effort',
+            enum: effortLevels,
+            enumItemLabels: effortLevels.map(level => levelLabels[level] || level.charAt(0).toUpperCase() + level.slice(1)),
+            enumDescriptions: effortLevels.map(level => levelDescriptions[level] || level),
+            default: defaultEffort,
+            group: 'navigation',
+          }
+        }
+      };
+    }
+
+    // If no levels specified but thinking is enabled, no dropdown is shown
+    // The model will use default thinking behavior
+    return undefined;
+  }
+
+  /**
    * Build model info from configuration only
    */
   private buildModelInfoFromConfig(
@@ -939,6 +1057,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       const formattedName = showProviderPrefix
         ? (providerNameStyle === 'slash' ? `${providerId}/${model.name}` : `[${providerId}] ${model.name}`)
         : model.name;
+
+      // Build configuration schema if model supports thinking effort
+      const configurationSchema = this.buildConfigurationSchema(model);
+
       return {
         id: model.id,
         name: formattedName,
@@ -950,6 +1072,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           toolCalling: model.capabilities?.toolCalling ?? true,
           imageInput: model.capabilities?.vision ?? false,
         },
+        configurationSchema,
       };
     });
   }
@@ -975,6 +1098,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     };
 
     for (const model of configuredModels) {
+      // Build configuration schema if model supports thinking effort
+      const configurationSchema = this.buildConfigurationSchema(model);
+
       modelMap.set(model.id, {
         id: model.id,
         name: formatName(model.name),
@@ -986,34 +1112,48 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           toolCalling: model.capabilities?.toolCalling ?? true,
           imageInput: model.capabilities?.vision ?? false,
         },
+        configurationSchema,
       });
     }
 
-    // Then try to fetch from API and merge
+    // If there are configured models, use them directly without API call
+    if (configuredModels.length > 0) {
+      this.outputChannel.appendLine(`  Provider "${providerId}": using ${configuredModels.length} configured model(s), skipping API fetch`);
+      return Array.from(modelMap.values());
+    }
+
+    // Only fetch from API if no models are configured
+    this.outputChannel.appendLine(`  Provider "${providerId}": no configured models, fetching from API...`);
     try {
       const client = this.getClient(providerId);
       const response = await client.fetchModels();
 
       for (const apiModel of response.data) {
-        // If model already in config, keep config values (config priority)
-        if (!modelMap.has(apiModel.id)) {
-          // Use defaults for API-only models
-          const defaultMaxTokens = this.gatewayConfig.defaultMaxTokens;
-          const defaultMaxOutput = this.gatewayConfig.defaultMaxOutputTokens;
+        // Parse API model capabilities from extended fields
+        const hasVision = apiModel.supports_image_in === true;
+        const hasVideo = apiModel.supports_video_in === true;
+        const hasReasoning = apiModel.supports_reasoning === true;
+        // Use context_length from API if available, otherwise use default
+        const contextLength = apiModel.context_length || this.gatewayConfig.defaultMaxTokens;
+        // Use display_name from API if available
+        const displayName = apiModel.display_name || apiModel.id;
 
-          modelMap.set(apiModel.id, {
-            id: apiModel.id,
-            name: formatName(apiModel.id),
-            family: providerId,
-            maxInputTokens: defaultMaxTokens,
-            maxOutputTokens: defaultMaxOutput,
-            version: '',
-            capabilities: {
-              toolCalling: this.gatewayConfig.enableToolCalling,
-              imageInput: false,
-            },
-          });
-        }
+        this.outputChannel.appendLine(
+          `    API model: ${apiModel.id} (vision=${hasVision}, reasoning=${hasReasoning}, context=${contextLength})`
+        );
+
+        modelMap.set(apiModel.id, {
+          id: apiModel.id,
+          name: formatName(displayName),
+          family: providerId,
+          maxInputTokens: contextLength,
+          maxOutputTokens: this.gatewayConfig.defaultMaxOutputTokens,
+          version: '',
+          capabilities: {
+            toolCalling: this.gatewayConfig.enableToolCalling,
+            imageInput: hasVision,
+          },
+        });
       }
 
       this.outputChannel.appendLine(`Merged ${modelMap.size} models (config + API)`);
@@ -1101,6 +1241,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       for (const apiModel of response.data) {
         const configuredModel = modelMap.get(apiModel.id);
 
+        // Build configuration schema if configured model supports thinking
+        const configurationSchema = configuredModel ? this.buildConfigurationSchema(configuredModel) : undefined;
+
         // API priority: use API model id, but config values if available
         result.push({
           id: apiModel.id,
@@ -1113,6 +1256,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
             toolCalling: configuredModel?.capabilities?.toolCalling ?? this.gatewayConfig.enableToolCalling,
             imageInput: configuredModel?.capabilities?.vision ?? false,
           },
+          configurationSchema,
         });
       }
 
@@ -1218,6 +1362,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
   /**
    * Calculate safe max output tokens
+   * Ensures minimum output capacity even under high input load
    */
   private calculateSafeMaxOutputTokens(estimatedInputTokens: number, toolsOverhead: number, modelId: string): number {
     const modelAndProvider = this.findModelAndProvider(modelId);
@@ -1225,15 +1370,36 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     const modelMaxContext = resolvedModel?.limit.context ?? this.gatewayConfig.defaultMaxTokens;
     const defaultMaxOutput = resolvedModel?.limit.output ?? this.gatewayConfig.defaultMaxOutputTokens;
     const totalEstimatedTokens = estimatedInputTokens + toolsOverhead;
-    const conservativeInputEstimate = Math.ceil(totalEstimatedTokens * 1.2);
-    const bufferTokens = 256;
+
+    // Dynamic buffer: smaller buffer when input is high to ensure output capacity
+    const inputPercentage = totalEstimatedTokens / modelMaxContext;
+    let bufferTokens: number;
+    let conservativeMultiplier: number;
+
+    if (inputPercentage > 0.8) {
+      // High usage: minimal buffer, no conservative multiplier
+      bufferTokens = 128;
+      conservativeMultiplier = 1.0;
+    } else if (inputPercentage > 0.6) {
+      // Medium usage: moderate buffer
+      bufferTokens = 192;
+      conservativeMultiplier = 1.1;
+    } else {
+      // Low usage: standard buffer
+      bufferTokens = 256;
+      conservativeMultiplier = 1.2;
+    }
+
+    const conservativeInputEstimate = Math.ceil(totalEstimatedTokens * conservativeMultiplier);
 
     let safeMaxOutputTokens = Math.min(
       defaultMaxOutput,
       Math.floor(modelMaxContext - conservativeInputEstimate - bufferTokens)
     );
 
-    return Math.max(64, safeMaxOutputTokens);
+    // Ensure minimum 4K output capacity for reasonable responses
+    const minOutputTokens = Math.min(4096, Math.floor(modelMaxContext * 0.2));
+    return Math.max(minOutputTokens, safeMaxOutputTokens);
   }
 
   /**
@@ -1405,6 +1571,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     // Get the client for this provider
     const client = this.getClient(providerId);
 
+    // Check if using Anthropic format (needed for thinking configuration and streaming)
+    const provider = this.configManager.getProvider(providerId);
+    const isAnthropic = provider?.apiFormat === 'anthropic';
+
     // Convert messages and categorize tokens
     const { messages: openAIMessages, categoryTokens } = await this.convertMessagesWithCategories(messages, model, token);
     const { messagesTokens, filesTokens, toolResultsTokens } = categoryTokens;
@@ -1418,22 +1588,16 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       this.outputChannel.appendLine(`  Message ${i + 1}: role=${msg.role}, hasContent=${!!msg.content}, hasToolCalls=${!!msg.tool_calls}, toolCallId=${toolCallId}`);
     }
 
-    // Calculate token limits and truncate
+    // Calculate token limits (for display only, don't truncate - Copilot Chat manages context)
     const modelMaxContext = resolvedModel?.limit.context ?? this.gatewayConfig.defaultMaxTokens;
     const desiredOutputTokens = Math.min(
       resolvedModel?.limit.output ?? this.gatewayConfig.defaultMaxOutputTokens,
       Math.floor(modelMaxContext / 2)
     );
-    const toolsTokenEstimate = options.tools ? Math.ceil(this.safeStringify(options.tools).length / 4 * 1.2) : 0;
-    const maxInputTokens = modelMaxContext - desiredOutputTokens - toolsTokenEstimate - 256;
+    const toolsTokenEstimate = options.tools ? await this.provideTokenCount(model, this.safeStringify(options.tools), token) : 0;
 
-    const truncatedMessages = this.truncateMessagesToFit(openAIMessages, maxInputTokens);
-    if (truncatedMessages.length < openAIMessages.length) {
-      this.outputChannel.appendLine(`WARNING: Truncated conversation from ${openAIMessages.length} to ${truncatedMessages.length} messages to fit context limit`);
-    }
-
-    // Build input text for token estimation
-    const inputText = truncatedMessages
+    // Build input text for token estimation using full messages (Copilot Chat manages context)
+    const inputText = openAIMessages
       .map((m) => {
         let text = typeof m.content === 'string' ? m.content : this.safeStringify(m.content || '');
         if (m.tool_calls) { text += this.safeStringify(m.tool_calls); }
@@ -1441,7 +1605,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       })
       .join('\n');
 
-    const toolsOverhead = options.tools ? Math.ceil(this.safeStringify(options.tools).length / 4) : 0;
+    const toolsOverhead = options.tools ? await this.provideTokenCount(model, this.safeStringify(options.tools), token) : 0;
     const estimatedInputTokens = await this.provideTokenCount(model, inputText, token) + toolsOverhead;
     const safeMaxOutputTokens = this.calculateSafeMaxOutputTokens(estimatedInputTokens, toolsOverhead, model.id);
 
@@ -1501,20 +1665,40 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
       this.outputChannel.appendLine(`[Token Statistics Debug] Total details items: ${details.length}`);
 
+      // Save details for later updates
+      this.currentTokenDetails = details;
+
       this.updateTokenStatusBar(totalTokens, modelMaxContext, reservedOutputTokens, details);
     }
 
     // Build request
     const hasTools = (modelCapabilities?.toolCalling ?? this.gatewayConfig.enableToolCalling) &&
                      options.tools && options.tools.length > 0;
-    const temperature = hasTools ? (this.gatewayConfig.agentTemperature ?? 0) : 0.7;
 
     const requestOptions: Record<string, unknown> = {
       model: model.id,
-      messages: truncatedMessages,
+      messages: openAIMessages,
       max_tokens: safeMaxOutputTokens,
-      temperature,
     };
+
+    // Add sampling parameters ONLY if explicitly configured
+    // Temperature: use model config > tool mode default, or don't send if neither
+    if (resolvedModel?.options?.temperature !== undefined) {
+      requestOptions.temperature = resolvedModel.options.temperature;
+    } else if (hasTools) {
+      requestOptions.temperature = this.gatewayConfig.agentTemperature ?? 0;
+    }
+    // If neither configured, don't send temperature (let server use default)
+
+    if (resolvedModel?.options?.topP !== undefined) {
+      requestOptions.top_p = resolvedModel.options.topP;
+    }
+    if (resolvedModel?.options?.frequencyPenalty !== undefined) {
+      requestOptions.frequency_penalty = resolvedModel.options.frequencyPenalty;
+    }
+    if (resolvedModel?.options?.presencePenalty !== undefined) {
+      requestOptions.presence_penalty = resolvedModel.options.presencePenalty;
+    }
 
     const toolsConfig = this.buildToolsConfig(options, modelCapabilities);
     if (toolsConfig) {
@@ -1527,9 +1711,61 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     }
 
     // Add model-specific options (e.g., thinking configuration)
-    if (resolvedModel?.options?.thinking) {
-      requestOptions.thinking = resolvedModel.options.thinking;
-      this.outputChannel.appendLine(`Thinking enabled: type=${resolvedModel.options.thinking.type}, budgetTokens=${resolvedModel.options.thinking.budgetTokens || 'default'}`);
+    if (resolvedModel?.options?.thinking && resolvedModel.options.thinking.type === 'enabled') {
+      const thinking = resolvedModel.options.thinking;
+
+      // Get user-selected effort from model configuration
+      // If user selected from dropdown, use that value
+      // Otherwise, use config default (effort) or first available level
+      const userSelectedEffort = (options as unknown as Record<string, unknown>)?.modelConfiguration?.reasoningEffort;
+      const configEffort = thinking.effort;
+      const availableLevels = thinking.levels;
+
+      // Determine effective effort:
+      // 1. User selected from dropdown (highest priority)
+      // 2. Configured effort value
+      // 3. First available level (if levels configured)
+      // 4. undefined (use API default)
+      let effectiveEffort: string | undefined;
+      if (typeof userSelectedEffort === 'string') {
+        effectiveEffort = userSelectedEffort;
+      } else if (configEffort) {
+        effectiveEffort = configEffort;
+      } else if (availableLevels && availableLevels.length > 0) {
+        effectiveEffort = availableLevels[0];
+      }
+
+      // Handle different API formats for thinking configuration
+      if (isAnthropic) {
+        // Anthropic format: { type: 'enabled', budget_tokens: number }
+        // Only send thinking object if budgetTokens is specified
+        if (thinking.budgetTokens) {
+          requestOptions.thinking = {
+            type: thinking.type,
+            budget_tokens: thinking.budgetTokens,
+          };
+        }
+      } else {
+        // OpenAI-compatible format
+        // For o1/o3 models: reasoning_effort field
+        if (effectiveEffort) {
+          requestOptions.reasoning_effort = effectiveEffort;
+        }
+
+        // Some APIs may use thinking object
+        if (thinking.budgetTokens) {
+          requestOptions.thinking = {
+            type: thinking.type,
+            budget_tokens: thinking.budgetTokens,
+          };
+        }
+      }
+
+      this.outputChannel.appendLine(
+        `Thinking configured: type=${thinking.type}, ` +
+        `${effectiveEffort ? `effort=${effectiveEffort}${userSelectedEffort ? ' (user selected)' : ' (config default)'}, ` : 'effort=API default, '}` +
+        `${thinking.budgetTokens ? `budgetTokens=${thinking.budgetTokens}` : 'budgetTokens=API default'}`
+      );
     }
 
     if (options.modelOptions) {
@@ -1539,10 +1775,6 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     // Log request
     const debugRequest = this.safeStringify(requestOptions);
     this.outputChannel.appendLine(debugRequest.length > 2000 ? `Request (truncated): ${debugRequest.substring(0, 2000)}...` : `Request: ${debugRequest}`);
-
-    // Check if using Anthropic format
-    const provider = this.configManager.getProvider(providerId);
-    const isAnthropic = provider?.apiFormat === 'anthropic';
 
     try {
       let totalContent = '';
@@ -1563,10 +1795,19 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           }
 
           // Handle thinking content from Claude 3.7+
+          // Try to use LanguageModelThinkingPart if available (VS Code API), otherwise accumulate silently
           if (chunk.thinking) {
             totalContent += chunk.thinking;
-            // Report thinking as text content since LanguageModelThinkingPart may not be available
-            progress.report(new vscode.LanguageModelTextPart(chunk.thinking));
+            // Try to report as ThinkingPart for collapsible UI, fallback to silent accumulation
+            try {
+              // @ts-ignore - LanguageModelThinkingPart may not be in the types yet
+              if (vscode.LanguageModelThinkingPart) {
+                // @ts-ignore
+                progress.report(new vscode.LanguageModelThinkingPart(chunk.thinking));
+              }
+            } catch {
+              // ThinkingPart not available, don't expose thinking to user
+            }
           }
 
           // Capture usage data (Anthropic usually provides this)
@@ -1593,9 +1834,18 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           }
 
           // Handle reasoning_content (thinking) from OpenAI-compatible APIs (e.g., DeepSeek, Qwen)
+          // Try to use LanguageModelThinkingPart if available for collapsible UI
           if (chunk.reasoning) {
             totalContent += chunk.reasoning;
-            progress.report(new vscode.LanguageModelTextPart(chunk.reasoning));
+            try {
+              // @ts-ignore - LanguageModelThinkingPart may not be in the types yet
+              if (vscode.LanguageModelThinkingPart) {
+                // @ts-ignore
+                progress.report(new vscode.LanguageModelThinkingPart(chunk.reasoning));
+              }
+            } catch {
+              // ThinkingPart not available, don't expose thinking to user
+            }
           }
 
           // Capture usage data if provided by API
@@ -1693,8 +1943,28 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
             this.outputChannel.appendLine(`Token usage via usage() failed (API may have changed): ${usageError}`);
           }
         } else {
-          this.outputChannel.appendLine(`Token usage tracking: prompt=${promptTokens}, completion=${completionTokens}`);
+          this.outputChannel.appendLine(`Token usage tracking: prompt=${promptTokens}, completion=${completionTokens}, total=${promptTokens + completionTokens}`);
         }
+
+        // Log detailed token breakdown from API
+        this.outputChannel.appendLine(`[Token API Response] prompt_tokens=${promptTokens}, completion_tokens=${completionTokens}, total_tokens=${promptTokens + completionTokens}`);
+        this.outputChannel.appendLine(`[Token Comparison] estimated_input=${estimatedInputTokens}, actual_prompt=${promptTokens}, diff=${promptTokens - estimatedInputTokens}`);
+
+        // Update status bar after conversation completes with ACTUAL token counts from API
+        // This gives us accurate picture of token usage including precise image token counts
+        const totalTokens = promptTokens + completionTokens;
+        this.currentSessionPromptTokens = promptTokens;
+        this.currentSessionCompletionTokens = completionTokens;
+        // Calculate reserved tokens for next response
+        const modelMaxContext = resolvedModel?.limit.context ?? this.gatewayConfig.defaultMaxTokens;
+        const desiredOutputTokens = Math.min(
+          resolvedModel?.limit.output ?? this.gatewayConfig.defaultMaxOutputTokens,
+          Math.floor(modelMaxContext / 2)
+        );
+        const reservedForNext = Math.max(64, desiredOutputTokens - completionTokens);
+        // Use saved details to preserve category breakdown
+        this.outputChannel.appendLine(`[Token Debug] Before update: estimated=${estimatedInputTokens}, API returned prompt=${promptTokens}, completion=${completionTokens}, total=${totalTokens}`);
+        this.updateTokenStatusBar(totalTokens, modelMaxContext, reservedForNext, this.currentTokenDetails);
       }
 
       if (totalContent.length === 0 && totalToolCalls === 0) {
@@ -1789,6 +2059,123 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       }
       return count;
     }
+  }
+
+  /**
+   * Calculate image tokens based on OpenAI/GPT-4V formula:
+   * 1. Resize to fit within 2048x2048 (maintaining aspect ratio)
+   * 2. Scale so shortest side is 768px (optional, for low detail mode)
+   * 3. Divide into 512x512 tiles
+   * 4. Token count = (num_tiles_x * num_tiles_y) * 170 + 85 (base tokens)
+   *
+   * Simplified formula: tokens = ceil(width/512) * ceil(height/512) * 170 + 85
+   */
+  private calculateImageTokens(data: Uint8Array, mimeType: string): number {
+    // Try to extract dimensions from image data
+    const dimensions = this.extractImageDimensions(data, mimeType);
+
+    if (dimensions) {
+      const { width, height } = dimensions;
+
+      // Step 1: Resize to fit within 2048x2048
+      let w = width;
+      let h = height;
+      const maxSize = 2048;
+      if (w > maxSize || h > maxSize) {
+        const scale = maxSize / Math.max(w, h);
+        w = Math.floor(w * scale);
+        h = Math.floor(h * scale);
+      }
+
+      // Step 2: Calculate tiles (512x512 each)
+      const tilesX = Math.ceil(w / 512);
+      const tilesY = Math.ceil(h / 512);
+      const totalTiles = tilesX * tilesY;
+
+      // Step 3: Calculate tokens (170 per tile + 85 base)
+      const tokens = totalTiles * 170 + 85;
+
+      this.outputChannel.appendLine(`  Image dimensions: ${width}x${height} -> scaled ${w}x${h}, tiles: ${tilesX}x${tilesY}=${totalTiles}, tokens: ${tokens}`);
+      return tokens;
+    }
+
+    // Fallback: estimate based on file size
+    // This is less accurate but provides a reasonable estimate
+    const fileSizeKB = data.length / 1024;
+    // Assume 1KB ≈ 8 tiles (rough estimate for compressed images)
+    const estimatedTiles = Math.max(1, Math.ceil(fileSizeKB / 8));
+    const tokens = estimatedTiles * 170 + 85;
+
+    this.outputChannel.appendLine(`  Image size: ${fileSizeKB.toFixed(2)}KB, estimated tiles: ${estimatedTiles}, tokens: ${tokens} (dimensions unknown)`);
+    return tokens;
+  }
+
+  /**
+   * Extract image dimensions from binary data
+   * Supports PNG, JPEG, GIF, WebP
+   */
+  private extractImageDimensions(data: Uint8Array, mimeType: string): { width: number; height: number } | null {
+    try {
+      const buffer = Buffer.from(data);
+
+      // PNG: dimensions at offset 16-24 (big-endian)
+      if (mimeType === 'image/png') {
+        if (buffer.length >= 24 && buffer.toString('hex', 0, 8) === '89504e470d0a1a0a') {
+          const width = buffer.readUInt32BE(16);
+          const height = buffer.readUInt32BE(20);
+          return { width, height };
+        }
+      }
+
+      // JPEG: parse SOF markers
+      if (mimeType === 'image/jpeg' || mimeType === 'image/jpg') {
+        let offset = 2; // Skip SOI marker
+        while (offset < buffer.length - 8) {
+          if (buffer[offset] !== 0xff) {
+            offset++;
+            continue;
+          }
+          const marker = buffer[offset + 1];
+          // SOF0, SOF1, SOF2, SOF3, SOF5, SOF6, SOF7, SOF9, SOF10, SOF11, SOF13, SOF14, SOF15
+          if ((marker >= 0xc0 && marker <= 0xc3) || (marker >= 0xc5 && marker <= 0xc7) ||
+              (marker >= 0xc9 && marker <= 0xcb) || (marker >= 0xcd && marker <= 0xcf)) {
+            const height = buffer.readUInt16BE(offset + 5);
+            const width = buffer.readUInt16BE(offset + 7);
+            return { width, height };
+          }
+          // Skip segment
+          const segmentLength = buffer.readUInt16BE(offset + 2);
+          offset += 2 + segmentLength;
+        }
+      }
+
+      // GIF: dimensions at offset 6-10 (little-endian)
+      if (mimeType === 'image/gif') {
+        const sig = buffer.toString('ascii', 0, 6);
+        if (buffer.length >= 10 && (sig === 'GIF87a' || sig === 'GIF89a')) {
+          const width = buffer.readUInt16LE(6);
+          const height = buffer.readUInt16LE(8);
+          return { width, height };
+        }
+      }
+
+      // WebP: VP8 or VP8L chunk
+      if (mimeType === 'image/webp') {
+        if (buffer.length >= 30 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') {
+          // Try VP8 (lossy) - simplified
+          const vp8Index = buffer.indexOf(Buffer.from('VP8 '), 12);
+          if (vp8Index !== -1 && buffer.length >= vp8Index + 14) {
+            // VP8 dimensions in bitstream (simplified extraction)
+            const width = buffer.readUInt16LE(vp8Index + 10) & 0x3fff;
+            const height = buffer.readUInt16LE(vp8Index + 8) & 0x3fff;
+            if (width > 0 && height > 0) return { width, height };
+          }
+        }
+      }
+    } catch (error) {
+      this.outputChannel.appendLine(`  Failed to extract image dimensions: ${error}`);
+    }
+    return null;
   }
 
   /**

@@ -228,12 +228,34 @@
           "markdownDescription": "%config.enableTokenStatistics.markdownDescription%",
           "order": 15
         },
+        "github.copilot.llm-gateway.logLevel": {
+          "type": "string",
+          "enum": ["error", "warning", "info", "debug"],
+          "default": "info",
+          "description": "%config.logLevel.description%",
+          "markdownDescription": "%config.logLevel.markdownDescription%",
+          "order": 16
+        },
+        "github.copilot.llm-gateway.logShowTimestamp": {
+          "type": "boolean",
+          "default": false,
+          "description": "%config.logShowTimestamp.description%",
+          "markdownDescription": "%config.logShowTimestamp.markdownDescription%",
+          "order": 17
+        },
+        "github.copilot.llm-gateway.logDetailedToolInfo": {
+          "type": "boolean",
+          "default": false,
+          "description": "%config.logDetailedToolInfo.description%",
+          "markdownDescription": "%config.logDetailedToolInfo.markdownDescription%",
+          "order": 18
+        },
         "github.copilot.llm-gateway.enableCopilotUsageReport": {
           "type": "boolean",
           "default": false,
           "description": "%config.enableCopilotUsageReport.description%",
           "markdownDescription": "%config.enableCopilotUsageReport.markdownDescription%",
-          "order": 16
+          "order": 19
         }
       }
     }

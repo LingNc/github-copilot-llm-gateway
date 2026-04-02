@@ -27,6 +27,8 @@ export class ConfigManager {
   private currentConfig: MultiProviderConfig;
   private onConfigChanged: (config: MultiProviderConfig) => void;
 
+  private debounceTimer: NodeJS.Timeout | undefined;
+
   constructor(
     outputChannel: vscode.OutputChannel,
     onConfigChanged: (config: MultiProviderConfig) => void
@@ -36,7 +38,7 @@ export class ConfigManager {
     this.config = vscode.workspace.getConfiguration(CONFIG_SECTION);
     this.currentConfig = this.loadConfig();
 
-    // Watch for configuration changes
+    // Watch for configuration changes with debounce
     vscode.workspace.onDidChangeConfiguration(this.handleConfigChange.bind(this));
   }
 
@@ -235,12 +237,19 @@ export class ConfigManager {
   }
 
   /**
-   * Handle configuration changes
+   * Handle configuration changes with debounce
    */
   private handleConfigChange(event: vscode.ConfigurationChangeEvent): void {
     if (event.affectsConfiguration(CONFIG_SECTION)) {
-      this.outputChannel.appendLine('Configuration changed, reloading...');
-      this.reloadConfig();
+      // Clear existing timer to debounce rapid changes
+      if (this.debounceTimer) {
+        clearTimeout(this.debounceTimer);
+      }
+      // Delay reload to avoid UI jumping during settings editing
+      this.debounceTimer = setTimeout(() => {
+        this.outputChannel.appendLine('Configuration changed, reloading...');
+        this.reloadConfig();
+      }, 500);
     }
   }
 

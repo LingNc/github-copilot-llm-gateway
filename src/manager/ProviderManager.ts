@@ -52,6 +52,11 @@ export class ProviderManager {
   public dispose(): void {
     this.outputChannel.appendLine('Disposing provider...');
 
+    if (this.provider) {
+      this.provider.dispose();
+      this.provider = undefined;
+    }
+
     if (this.providerDisposable) {
       this.providerDisposable.dispose();
       this.providerDisposable = undefined;

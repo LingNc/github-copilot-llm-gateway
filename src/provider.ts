@@ -330,6 +330,16 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   }
 
   /**
+   * Dispose provider resources
+   */
+  public dispose(): void {
+    if (this.tokenStatusBarItem) {
+      this.tokenStatusBarItem.dispose();
+      this.tokenStatusBarItem = undefined;
+    }
+  }
+
+  /**
    * Update cached debug settings
    */
   private updateDebugSettings(): void {

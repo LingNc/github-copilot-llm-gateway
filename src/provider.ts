@@ -368,12 +368,39 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
   /**
    * Convert a tool result part to OpenAI format
+   * IMPROVED: Handle content as array (like Copilot does)
    */
   private convertToolResultPart(part: vscode.LanguageModelToolResultPart): Record<string, unknown> {
+    // Content can be a single value or an array of parts (LanguageModelTextPart, LanguageModelDataPart, etc.)
+    let contentStr: string;
+
+    if (Array.isArray(part.content)) {
+      // Content is an array of parts - extract text from each
+      const parts: string[] = [];
+      for (const item of part.content) {
+        if (item instanceof vscode.LanguageModelTextPart) {
+          parts.push(item.value);
+        } else if (item instanceof vscode.LanguageModelDataPart) {
+          // Binary data - just note it was present
+          parts.push(`[Data: ${item.mimeType}, ${item.data.length} bytes]`);
+        } else if (typeof item === 'string') {
+          parts.push(item);
+        } else {
+          // Unknown part type - stringify
+          parts.push(this.safeStringify(item));
+        }
+      }
+      contentStr = parts.join('');
+    } else if (typeof part.content === 'string') {
+      contentStr = part.content;
+    } else {
+      contentStr = this.safeStringify(part.content);
+    }
+
     return {
       tool_call_id: part.callId,
       role: 'tool',
-      content: typeof part.content === 'string' ? part.content : this.safeStringify(part.content),
+      content: contentStr,
     };
   }
 
@@ -389,6 +416,32 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         arguments: this.safeStringify(part.input),
       },
     };
+  }
+
+  /**
+   * Extract content from a tool result part for token counting
+   * Handles both string content and array of parts (like Copilot does)
+   */
+  private extractToolResultContent(part: vscode.LanguageModelToolResultPart): string {
+    if (Array.isArray(part.content)) {
+      const parts: string[] = [];
+      for (const item of part.content) {
+        if (item instanceof vscode.LanguageModelTextPart) {
+          parts.push(item.value);
+        } else if (item instanceof vscode.LanguageModelDataPart) {
+          parts.push(`[Data: ${item.mimeType}, ${item.data.length} bytes]`);
+        } else if (typeof item === 'string') {
+          parts.push(item);
+        } else {
+          parts.push(this.safeStringify(item));
+        }
+      }
+      return parts.join('');
+    } else if (typeof part.content === 'string') {
+      return part.content;
+    } else {
+      return this.safeStringify(part.content);
+    }
   }
 
   /**
@@ -463,16 +516,17 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         } else if (part instanceof vscode.LanguageModelToolResultPart) {
           const toolResult = this.convertToolResultPart(part);
           toolResults.push(toolResult);
-          // Count tool result content - detect if it's base64 image data
-          const toolResultText = typeof toolResult.content === 'string' ? toolResult.content : this.safeStringify(toolResult.content);
+
+          // IMPROVED: Calculate tokens from the actual tool result content (handles arrays correctly)
+          const toolResultText = toolResult.content as string;
+          const textLength = toolResultText.length;
 
           // DEBUG: Log tool result size
-          const textLength = toolResultText.length;
-          const preview = toolResultText.substring(0, 200).replace(/\n/g, '\\n');
+          const preview = textLength > 200 ? toolResultText.substring(0, 200).replace(/\n/g, '\\n') : toolResultText.replace(/\n/g, '\\n');
           this.outputChannel.appendLine(`[Tool Result Debug] callId=${part.callId}, length=${textLength}, preview="${preview}..."`);
 
           // Check if content is base64 image data (from view_image tool)
-          if (typeof toolResultText === 'string' && toolResultText.startsWith('data:image/')) {
+          if (toolResultText.startsWith('data:image/')) {
             // Extract mime type and base64 data
             const match = toolResultText.match(/^data:image\/([^;]+);base64,(.+)$/);
             if (match) {
@@ -2116,8 +2170,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           if (part instanceof vscode.LanguageModelTextPart) {
             parts.push(part.value);
           } else if (part instanceof vscode.LanguageModelToolResultPart) {
-            // Include tool result content
-            parts.push(`Tool result: ${part.callId}`);
+            // IMPROVED: Include actual tool result content for accurate token counting
+            const toolResultContent = this.extractToolResultContent(part);
+            parts.push(toolResultContent);
           } else if (part instanceof vscode.LanguageModelToolCallPart) {
             // Include tool call content
             parts.push(`Tool call: ${part.name}`);

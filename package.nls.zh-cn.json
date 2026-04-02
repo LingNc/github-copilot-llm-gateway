@@ -70,5 +70,11 @@
   "Thinking Effort": "思考等级",
   "Faster responses with less reasoning": "响应更快，推理较少",
   "Balanced reasoning and speed": "平衡推理与速度",
-  "Maximum reasoning depth": "最大推理深度"
+  "Maximum reasoning depth": "最大推理深度",
+  "config.logLevel.description": "输出面板的日志级别 (error, warning, info, debug)",
+  "config.logLevel.markdownDescription": "控制输出面板中日志的详细程度。**error**: 仅错误信息；**warning**: 警告和错误；**info**: 关键流程信息（默认）；**debug**: 详细信息，包括工具定义和Token计算",
+  "config.logShowTimestamp.description": "在日志输出中显示时间戳",
+  "config.logShowTimestamp.markdownDescription": "在输出面板的每行日志前添加时间戳",
+  "config.logDetailedToolInfo.description": "在日志中显示详细的工具信息",
+  "config.logDetailedToolInfo.markdownDescription": "启用后，在调试日志中显示完整的工具定义，包括描述和参数"
 }

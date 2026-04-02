@@ -1623,9 +1623,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     const estimatedInputTokens = await this.provideTokenCount(model, inputText, token) + toolsOverhead;
     const safeMaxOutputTokens = this.calculateSafeMaxOutputTokens(estimatedInputTokens, toolsOverhead, model.id);
 
-    this.outputChannel.appendLine(
-      `Token estimate: input=${estimatedInputTokens}, tools=${toolsOverhead}, model_context=${modelMaxContext}, chosen_max_tokens=${safeMaxOutputTokens}`
-    );
+    this.logService.info('Token', `Estimate: input=${estimatedInputTokens}, tools=${toolsOverhead}, context=${modelMaxContext}, output=${safeMaxOutputTokens}`);
 
     // Update token statistics display if enabled
     if (tokenStatisticsEnabled) {

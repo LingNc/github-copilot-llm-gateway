@@ -67,6 +67,7 @@ npm run package
 - [x] **问题修复**: config-priority模式优化（有配置时跳过API请求）
 - [ ] **问题排查**: 模型重复显示（VS Code/Copilot缓存问题）
 - [x] **计划 2**: 后台输出优化（日志级别、美化格式、工具信息简化）- 已完成
+- [ ] **计划 7**: provider.ts 重构拆分（单文件近3000行，按功能拆分为多模块）
 - [ ] **计划 3**: Token 估算算法优化（precise/fast-estimate/none 模式）
 - [ ] **计划 4**: 切换模型时自动隐藏 Token 状态栏
 - [ ] **计划 5**: 模型上下文长度显示异常问题排查
@@ -155,6 +156,48 @@ npm run package
 **预估工作量**: 3-4 小时
 
 **优先级**: 中（提升开发调试体验）
+
+---
+
+#### 计划 7: provider.ts 重构拆分
+
+**目标**: 将庞大的 provider.ts 按功能拆分为多个模块，提高代码可维护性
+
+**背景**: 
+- 当前 `src/provider.ts` 已近 3000 行，包含多个职责：
+  - 语言模型提供程序核心逻辑
+  - Token 计算和管理
+  - 消息转换和处理
+  - 状态栏管理
+  - 工具调用处理
+  - 图片/文件处理
+- 单文件过大导致：
+  - 代码导航困难
+  - 团队协作冲突概率高
+  - 测试和维护成本高
+
+**拆分方案**:
+
+```
+src/provider/
+├── index.ts              # GatewayProvider 主类（精简版）
+├── tokenManager.ts       # Token 计算、状态栏管理
+├── messageConverter.ts   # 消息格式转换（VS Code → OpenAI）
+├── toolHandler.ts        # 工具调用处理
+├── contentProcessor.ts   # 图片/文件内容处理
+└── streamHandler.ts      # SSE 流式响应处理
+```
+
+**迁移步骤**:
+1. 提取 Token 相关逻辑到 `tokenManager.ts`
+2. 提取消息转换逻辑到 `messageConverter.ts`
+3. 提取工具处理逻辑到 `toolHandler.ts`
+4. 提取内容处理逻辑到 `contentProcessor.ts`
+5. 重构后主文件保持 500 行以内
+
+**预估工作量**: 4-6 小时
+
+**优先级**: 低（代码质量优化，非功能必需）
 
 ---
 

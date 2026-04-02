@@ -12,10 +12,8 @@ import { ConfigManager } from './config/ConfigManager';
 import { ResolvedModel, ConfigMode, ProviderNameStyle } from './config/types';
 import { TokenUsageViewProvider } from './views/TokenUsageView';
 import { LogService } from './services/LogService';
+import { getGlobalStatusBarItem } from './extension';
 
-/**
- * Union type for either client type
- */
 type ApiClient = GatewayClient | AnthropicClient;
 
 /**
@@ -46,8 +44,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   private debugLogsEnabled = false;
   private tokenDebugLogsEnabled = false;
   private messageDebugLogsEnabled = false;
-  // Status bar item for token usage display
-  private tokenStatusBarItem: vscode.StatusBarItem | undefined;
+  // Status bar item for token display (use global to survive reloads)
+  private tokenStatusBarItem: vscode.StatusBarItem | undefined = getGlobalStatusBarItem();
   // Current session token statistics
   private currentContextTokens = 0;
   private currentModelMaxTokens = 0;
@@ -80,27 +78,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
    * Initialize status bar item for token display
    */
   private initializeStatusBar(context: vscode.ExtensionContext): void {
-    const config = vscode.workspace.getConfiguration('github.copilot.llm-gateway');
-    const tokenStatisticsEnabled = config.get<boolean>('enableTokenStatistics', true);
-
-    if (tokenStatisticsEnabled) {
-      // Only create if not already exists
-      if (!this.tokenStatusBarItem) {
-        this.tokenStatusBarItem = vscode.window.createStatusBarItem(
-          vscode.StatusBarAlignment.Right,
-          100
-        );
-        // Click has visual feedback but tooltip immediately reappears
-        // This mimics Copilot Chat's behavior where clicking doesn't disrupt the UX
-        this.tokenStatusBarItem.command = 'github.copilot.llm-gateway.statusBarNoOp';
-        context.subscriptions.push(this.tokenStatusBarItem);
-      }
+    // Use global status bar if available
+    this.tokenStatusBarItem = getGlobalStatusBarItem();
+    if (this.tokenStatusBarItem) {
       this.updateStatusBarVisibility();
-    } else {
-      // Hide if disabled
-      if (this.tokenStatusBarItem) {
-        this.tokenStatusBarItem.hide();
-      }
     }
   }
 
@@ -329,10 +310,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
    * Dispose provider resources
    */
   public dispose(): void {
-    if (this.tokenStatusBarItem) {
-      this.tokenStatusBarItem.dispose();
-      this.tokenStatusBarItem = undefined;
-    }
+    // Don't dispose tokenStatusBarItem - it's global and survives reloads
+    this.tokenStatusBarItem = undefined;
   }
 
   /**

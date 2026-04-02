@@ -72,16 +72,6 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     // Initialize status bar item
     this.initializeStatusBar(context);
 
-    // Watch for configuration changes
-    context.subscriptions.push(
-      vscode.workspace.onDidChangeConfiguration((e: vscode.ConfigurationChangeEvent) => {
-        if (e.affectsConfiguration('github.copilot.llm-gateway')) {
-          this.outputChannel.appendLine('Configuration changed, reloading...');
-          this.reloadConfig();
-        }
-      })
-    );
-
     // Initialize cached debug setting
     this.updateDebugSettings();
   }

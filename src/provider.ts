@@ -11,6 +11,7 @@ import {
 import { ConfigManager } from './config/ConfigManager';
 import { ResolvedModel, ConfigMode, ProviderNameStyle } from './config/types';
 import { TokenUsageViewProvider } from './views/TokenUsageView';
+import { LogService } from './services/LogService';
 
 /**
  * Union type for either client type
@@ -27,6 +28,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   private gatewayConfig: GatewayConfig;
   private outputChannel: vscode.OutputChannel;
   private configManager: ConfigManager;
+  private logService: LogService;
   // Store tool schemas for the current request to fill missing required properties
   private readonly currentToolSchemas: Map<string, unknown> = new Map();
   // Track if we've shown the welcome notification this session
@@ -55,10 +57,12 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   constructor(
     context: vscode.ExtensionContext,
     configManager: ConfigManager,
-    outputChannel: vscode.OutputChannel
+    outputChannel: vscode.OutputChannel,
+    logService: LogService
   ) {
     this.configManager = configManager;
     this.outputChannel = outputChannel;
+    this.logService = logService;
 
     // Load default config from first provider or global settings
     this.gatewayConfig = this.loadDefaultConfig();

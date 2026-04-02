@@ -27,6 +27,8 @@
   "config.enableDebugLogs.markdownDescription": "When enabled, outputs general debug information to the LLM Gateway output channel. Default: false",
   "config.enableTokenDebugLogs.description": "Enable token counting debug logs",
   "config.enableTokenDebugLogs.markdownDescription": "When enabled, outputs detailed token counting logs to the LLM Gateway output channel. This can be verbose. Default: false",
+  "config.enableMessageDebugLogs.description": "Enable message content debug logs",
+  "config.enableMessageDebugLogs.markdownDescription": "When enabled, outputs detailed message content, system prompts, and request bodies to the LLM Gateway output channel. This is very verbose. Default: false",
   "config.enableTokenStatistics.description": "Enable token usage statistics and status bar display",
   "config.enableTokenStatistics.markdownDescription": "When enabled, displays current session token usage percentage in the status bar and allows manual context compression. Default: true",
   "config.enableCopilotUsageReport.description": "Report token usage to Copilot Chat context window (experimental)",
@@ -66,5 +68,11 @@
   "Thinking Effort": "Thinking Effort",
   "Faster responses with less reasoning": "Faster responses with less reasoning",
   "Balanced reasoning and speed": "Balanced reasoning and speed",
-  "Maximum reasoning depth": "Maximum reasoning depth"
+  "Maximum reasoning depth": "Maximum reasoning depth",
+  "config.logLevel.description": "Log level for output panel (error, warning, info, debug)",
+  "config.logLevel.markdownDescription": "Control the verbosity of logs in the output panel. **error**: only errors; **warning**: warnings and errors; **info**: key flow information (default); **debug**: detailed information including tool definitions and token calculations",
+  "config.logShowTimestamp.description": "Show timestamps in log output",
+  "config.logShowTimestamp.markdownDescription": "Add timestamps to each log line in the output panel",
+  "config.logDetailedToolInfo.description": "Show detailed tool information in logs",
+  "config.logDetailedToolInfo.markdownDescription": "When enabled, show full tool definitions including descriptions and parameters in debug logs"
 }

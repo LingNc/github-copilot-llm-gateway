@@ -3,6 +3,7 @@ import { ConfigManager } from '../config/ConfigManager';
 import { GatewayProvider } from '../provider';
 import { MultiProviderConfig } from '../config/types';
 import { TokenUsageViewProvider } from '../views/TokenUsageView';
+import { LogService } from '../services/LogService';
 
 /**
  * Provider Manager class
@@ -11,6 +12,7 @@ import { TokenUsageViewProvider } from '../views/TokenUsageView';
 export class ProviderManager {
   private configManager: ConfigManager;
   private outputChannel: vscode.OutputChannel;
+  private logService: LogService;
   private context: vscode.ExtensionContext;
   private providerDisposable?: vscode.Disposable;
   private provider?: GatewayProvider;
@@ -19,10 +21,12 @@ export class ProviderManager {
 
   constructor(
     context: vscode.ExtensionContext,
-    outputChannel: vscode.OutputChannel
+    outputChannel: vscode.OutputChannel,
+    logService: LogService
   ) {
     this.context = context;
     this.outputChannel = outputChannel;
+    this.logService = logService;
 
     // Initialize ConfigManager with callback for config changes
     this.configManager = new ConfigManager(
@@ -47,6 +51,11 @@ export class ProviderManager {
    */
   public dispose(): void {
     this.outputChannel.appendLine('Disposing provider...');
+
+    if (this.provider) {
+      this.provider.dispose();
+      this.provider = undefined;
+    }
 
     if (this.providerDisposable) {
       this.providerDisposable.dispose();
@@ -151,7 +160,8 @@ export class ProviderManager {
       this.provider = new GatewayProvider(
         this.context,
         this.configManager,
-        this.outputChannel
+        this.outputChannel,
+        this.logService
       );
 
       // Register with VS Code - use the vendor ID declared in package.json
@@ -160,9 +170,7 @@ export class ProviderManager {
         this.provider
       );
 
-      this.outputChannel.appendLine(
-        `Provider "llm-gateway" registered with ${providers.length} provider(s).`
-      );
+      this.logService.info('Config', `Provider "llm-gateway" registered with ${providers.length} provider(s).`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.outputChannel.appendLine(`Failed to register provider: ${message}`);

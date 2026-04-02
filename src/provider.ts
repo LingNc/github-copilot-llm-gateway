@@ -284,7 +284,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       }));
     }
 
-    this.outputChannel.appendLine(`[Token Statistics] ${usedTokens}/${maxTokens} (${percentage}%)`);
+    this.logService.logTokens(usedTokens, maxTokens);
+    this.logService.debug('Token', `Details: ${details?.map(d => `${d.label}=${d.percentage}%`).join(', ') || 'none'}`);
   }
 
   /**
@@ -809,7 +810,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     client: ApiClient,
     isAnthropic: boolean
   ): Promise<void> {
-    this.outputChannel.appendLine(`Streaming chat completion...`);
+    this.logService.info('Request', 'Streaming chat completion...');
     let totalContent = '';
     let totalToolCalls = 0;
 
@@ -887,7 +888,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       }
     }
 
-    this.outputChannel.appendLine(`Completed chat request, received ${totalContent.length} characters, ${totalToolCalls} tool calls`);
+    this.logService.info('Response', `Completed: ${totalContent.length} chars, ${totalToolCalls} tool calls`);
   }
 
   /**
@@ -902,15 +903,15 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     const showProviderPrefix = this.configManager.shouldShowProviderPrefix();
     const providerNameStyle = this.configManager.getProviderNameStyle();
 
-    this.outputChannel.appendLine(`Fetching models from all providers (mode: ${configMode}, style: ${providerNameStyle})...`);
+    this.logService.info('Config', `Fetching models (mode: ${configMode}, style: ${providerNameStyle})...`);
 
     const allModels: vscode.LanguageModelChatInformation[] = [];
     const providers = this.configManager.getProviders();
 
-    this.outputChannel.appendLine(`Found ${providers.length} provider(s) in config`);
+    this.logService.info('Config', `Found ${providers.length} provider(s) in config`);
     for (const provider of providers) {
       const modelCount = Object.keys(provider.models || {}).length;
-      this.outputChannel.appendLine(`  Provider "${provider.id}": ${modelCount} model(s), baseURL=${provider.baseURL}`);
+      this.logService.debug('Config', `  Provider "${provider.id}": ${modelCount} model(s), baseURL=${provider.baseURL}`);
     }
 
     // Fetch models from all providers in parallel for better performance
@@ -925,11 +926,11 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           token
         );
         // Log model IDs with their source for debugging duplicates
-        this.outputChannel.appendLine(`  Provider "${provider.id}" returned models: [${providerModels.map(m => m.id).join(', ')}]`);
+        this.logService.debug('Config', `  Provider "${provider.id}" returned: [${providerModels.map(m => m.id).join(', ')}]`);
         return providerModels;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        this.outputChannel.appendLine(`Failed to fetch models from provider "${provider.id}": ${message}`);
+        this.logService.warning('Config', `Failed to fetch from "${provider.id}": ${message}`);
         return [];
       }
     });
@@ -939,7 +940,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       allModels.push(...providerModels);
     }
 
-    this.outputChannel.appendLine(`Found ${allModels.length} model(s) from all providers`);
+    this.logService.info('Config', `Found ${allModels.length} model(s) from all providers`);
 
     // Check for duplicate model IDs
     const idCounts = new Map<string, number>();
@@ -1882,7 +1883,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         this.outputChannel.appendLine(`Estimated completion tokens from content length: ${completionTokens}`);
       }
 
-      this.outputChannel.appendLine(`Completed chat request, received ${totalContent.length} characters, ${totalToolCalls} tool calls`);
+      this.logService.info('Response', `Completed: ${totalContent.length} chars, ${totalToolCalls} tool calls`);
 
       // Report token usage to VS Code for context window display
       if (promptTokens > 0 || completionTokens > 0) {

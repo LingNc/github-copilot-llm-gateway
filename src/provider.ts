@@ -460,9 +460,25 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         } else if (part instanceof vscode.LanguageModelToolResultPart) {
           const toolResult = this.convertToolResultPart(part);
           toolResults.push(toolResult);
-          // Count tool result content
+          // Count tool result content - detect if it's base64 image data
           const toolResultText = typeof toolResult.content === 'string' ? toolResult.content : this.safeStringify(toolResult.content);
-          toolResultsTokens += await this.provideTokenCount(model, toolResultText, token);
+          // Check if content is base64 image data (from view_image tool)
+          if (typeof toolResultText === 'string' && toolResultText.startsWith('data:image/')) {
+            // Extract mime type and base64 data
+            const match = toolResultText.match(/^data:image\/([^;]+);base64,(.+)$/);
+            if (match) {
+              const mimeType = `image/${match[1]}`;
+              const base64Data = match[2];
+              const byteLength = Math.ceil(base64Data.length * 0.75); // Approximate byte length
+              const estimatedTokens = this.calculateImageTokens(new Uint8Array(byteLength), mimeType);
+              toolResultsTokens += estimatedTokens;
+              this.logService.debug('Token', `Tool result image: ${mimeType}, ~${estimatedTokens} tokens`);
+            } else {
+              toolResultsTokens += await this.provideTokenCount(model, toolResultText, token);
+            }
+          } else {
+            toolResultsTokens += await this.provideTokenCount(model, toolResultText, token);
+          }
         } else if (part instanceof vscode.LanguageModelToolCallPart) {
           toolCalls.push(this.convertToolCallPart(part));
         }

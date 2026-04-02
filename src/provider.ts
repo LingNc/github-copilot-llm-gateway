@@ -556,7 +556,11 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       }
 
       requestOptions.parallel_tool_calls = this.gatewayConfig.parallelToolCalling;
-      this.outputChannel.appendLine(`Sending ${requestOptions.tools.length} tools to model (parallel: ${this.gatewayConfig.parallelToolCalling})`);
+      this.logService.logTools(
+        'Tool',
+        options.tools.map(t => ({ name: t.name, description: t.description })),
+        this.gatewayConfig.parallelToolCalling
+      );
     }
   }
 
@@ -1421,15 +1425,15 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     this.currentToolSchemas.clear();
 
-    return options.tools.map((tool) => {
-      this.outputChannel.appendLine(`Tool: ${tool.name}`);
-      this.outputChannel.appendLine(`  Description: ${tool.description?.substring(0, 100) || 'none'}...`);
-
+    const tools = options.tools.map((tool) => {
       const schema = tool.inputSchema as Record<string, unknown> | undefined;
       this.currentToolSchemas.set(tool.name, schema);
 
+      // Log detailed tool info only in debug mode
+      this.logService.debug('Tool', `Tool: ${tool.name}`);
+      this.logService.debug('Tool', `  Description: ${tool.description?.substring(0, 100) || 'none'}...`);
       if (schema?.required && Array.isArray(schema.required)) {
-        this.outputChannel.appendLine(`  Required properties: ${(schema.required as string[]).join(', ')}`);
+        this.logService.debug('Tool', `  Required properties: ${(schema.required as string[]).join(', ')}`);
       }
 
       return {
@@ -1437,6 +1441,11 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         function: { name: tool.name, description: tool.description, parameters: tool.inputSchema },
       };
     });
+
+    // Log summary in info mode
+    this.logService.info('Tool', `Built ${tools.length} tool schemas`);
+
+    return tools;
   }
 
   /**
@@ -1446,20 +1455,18 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     toolCall: { id: string; name: string; arguments: string },
     progress: vscode.Progress<vscode.LanguageModelResponsePart>
   ): void {
-    this.outputChannel.appendLine(`\n=== TOOL CALL RECEIVED ===`);
-    this.outputChannel.appendLine(`  ID: ${toolCall.id}`);
-    this.outputChannel.appendLine(`  Name: ${toolCall.name}`);
-    this.outputChannel.appendLine(`  Raw arguments: ${toolCall.arguments.substring(0, 1000)}${toolCall.arguments.length > 1000 ? '...' : ''}`);
+    this.logService.info('Tool', `Received: id=${toolCall.id}, name=${toolCall.name}`);
+    this.logService.debug('Tool', `  Raw arguments: ${toolCall.arguments.substring(0, 500)}${toolCall.arguments.length > 500 ? '...' : ''}`);
 
     let args = this.tryRepairJson(toolCall.arguments) as Record<string, unknown> | null;
 
     if (args === null) {
-      this.outputChannel.appendLine(`  ERROR: Failed to parse tool call arguments`);
-      this.outputChannel.appendLine(`  Full arguments: ${toolCall.arguments}`);
+      this.logService.error('Tool', `Failed to parse tool call arguments for ${toolCall.name}`);
+      this.logService.debug('Tool', `  Full arguments: ${toolCall.arguments}`);
       args = {};
     } else {
       const argKeys = Object.keys(args);
-      this.outputChannel.appendLine(`  Parsed argument keys: ${argKeys.length > 0 ? argKeys.join(', ') : '(none)'}`);
+      this.logService.debug('Tool', `  Parsed argument keys: ${argKeys.length > 0 ? argKeys.join(', ') : '(none)'}`);
     }
 
     const toolSchema = this.currentToolSchemas.get(toolCall.name) as Record<string, unknown> | undefined;
@@ -1467,7 +1474,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       args = this.fillMissingRequiredProperties(args, toolCall.name, toolSchema);
     }
 
-    this.outputChannel.appendLine(`=== END TOOL CALL ===\n`);
+    this.logService.debug('Tool', `Completed processing tool call: ${toolCall.name}`);
     progress.report(new vscode.LanguageModelToolCallPart(toolCall.id, toolCall.name, args));
   }
 

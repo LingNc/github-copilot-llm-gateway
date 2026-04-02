@@ -101,6 +101,7 @@ export class ConfigManager {
     const models: ResolvedModel[] = [];
 
     for (const [providerId, provider] of Object.entries(this.currentConfig.providers)) {
+      if (!provider.models) continue;
       for (const [modelId, model] of Object.entries(provider.models)) {
         models.push({
           ...model,
@@ -119,7 +120,7 @@ export class ConfigManager {
    */
   public getModelsForProvider(providerId: string): ResolvedModel[] {
     const provider = this.currentConfig.providers[providerId];
-    if (!provider) {
+    if (!provider || !provider.models) {
       return [];
     }
 
@@ -136,7 +137,7 @@ export class ConfigManager {
    */
   public getModel(providerId: string, modelId: string): ResolvedModel | undefined {
     const provider = this.currentConfig.providers[providerId];
-    if (!provider) {
+    if (!provider || !provider.models) {
       return undefined;
     }
 

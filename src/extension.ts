@@ -5,6 +5,36 @@ import { registerConfigCommands } from './commands';
 import { TokenUsageViewProvider } from './views/TokenUsageView';
 import { LogService } from './services/LogService';
 
+// Global status bar item - survives provider reloads
+let globalTokenStatusBarItem: vscode.StatusBarItem | undefined;
+
+/**
+ * Get or create global status bar item
+ */
+export function getGlobalStatusBarItem(): vscode.StatusBarItem | undefined {
+  return globalTokenStatusBarItem;
+}
+
+/**
+ * Initialize global status bar item
+ */
+export function initGlobalStatusBarItem(context: vscode.ExtensionContext): vscode.StatusBarItem | undefined {
+  const config = vscode.workspace.getConfiguration('github.copilot.llm-gateway');
+  const tokenStatisticsEnabled = config.get<boolean>('enableTokenStatistics', true);
+
+  if (tokenStatisticsEnabled) {
+    if (!globalTokenStatusBarItem) {
+      globalTokenStatusBarItem = vscode.window.createStatusBarItem(
+        vscode.StatusBarAlignment.Right,
+        100
+      );
+      globalTokenStatusBarItem.command = 'github.copilot.llm-gateway.statusBarNoOp';
+      context.subscriptions.push(globalTokenStatusBarItem);
+    }
+  }
+  return globalTokenStatusBarItem;
+}
+
 /**
  * Extension activation
  */
@@ -27,6 +57,9 @@ export async function activate(context: vscode.ExtensionContext) {
   });
 
   logService.info('Config', 'Extension activating...');
+
+  // Initialize global status bar (survives provider reloads)
+  initGlobalStatusBarItem(context);
 
   // Create ProviderManager
   const providerManager = new ProviderManager(context, outputChannel, logService);

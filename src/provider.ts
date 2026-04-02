@@ -561,9 +561,39 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
             messagesTokens += await this.provideTokenCount(model, anyPart.value, token);
           } else if ('content' in anyPart) {
             // Might be a tool result that failed instanceof
-            const contentStr = typeof anyPart.content === 'string' ? anyPart.content : this.safeStringify(anyPart.content);
+            // IMPROVED: Handle array content like convertToolResultPart does
+            let contentStr: string;
+            const content = anyPart.content;
+
+            if (Array.isArray(content)) {
+              // Content is array of parts - extract text and handle images
+              const parts: string[] = [];
+              for (const item of content) {
+                if (item instanceof vscode.LanguageModelTextPart ||
+                    (typeof item === 'object' && 'value' in item && typeof item.value === 'string')) {
+                  // TextPart or duck-typed text part
+                  parts.push(item.value || String(item));
+                } else if (item instanceof vscode.LanguageModelDataPart ||
+                           (typeof item === 'object' && 'mimeType' in item && 'data' in item)) {
+                  // DataPart or duck-typed data part (likely image)
+                  const mimeType = item.mimeType || 'application/octet-stream';
+                  const dataLength = item.data?.length || 0;
+                  parts.push(`[Data: ${mimeType}, ${dataLength} bytes]`);
+                } else if (typeof item === 'string') {
+                  parts.push(item);
+                } else {
+                  parts.push(this.safeStringify(item));
+                }
+              }
+              contentStr = parts.join('');
+            } else if (typeof content === 'string') {
+              contentStr = content;
+            } else {
+              contentStr = this.safeStringify(content);
+            }
+
             if ('callId' in anyPart && !('name' in anyPart)) {
-              this.outputChannel.appendLine(`[Part Debug]   Treating as tool result (duck-typed): callId=${anyPart.callId}`);
+              this.outputChannel.appendLine(`[Part Debug]   Treating as tool result (duck-typed): callId=${anyPart.callId}, contentLength=${contentStr.length}`);
               toolResults.push({
                 tool_call_id: anyPart.callId,
                 role: 'tool',
@@ -1421,7 +1451,38 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       // Additional check: tool results should have content that looks like tool output
       // If content looks like a regular message (starts with common text patterns), treat as text
       const content = anyPart.content;
-      const contentStr = typeof content === 'string' ? content : this.safeStringify(content);
+
+      // IMPROVED: Handle array content properly (like Copilot does)
+      let contentStr: string;
+      if (Array.isArray(content)) {
+        // Content is array of parts - extract text and handle images/data properly
+        const parts: string[] = [];
+        for (const item of content) {
+          if (typeof item === 'string') {
+            parts.push(item);
+          } else if (item && typeof item === 'object') {
+            if ('value' in item && typeof item.value === 'string') {
+              // TextPart
+              parts.push(item.value);
+            } else if ('mimeType' in item && 'data' in item) {
+              // DataPart (image or binary data) - don't include full data, just metadata
+              const mimeType = String(item.mimeType || 'application/octet-stream');
+              const dataLength = item.data?.length || 0;
+              parts.push(`[Data: ${mimeType}, ${dataLength} bytes]`);
+            } else {
+              // Other object types
+              parts.push(this.safeStringify(item));
+            }
+          } else {
+            parts.push(String(item));
+          }
+        }
+        contentStr = parts.join('');
+      } else if (typeof content === 'string') {
+        contentStr = content;
+      } else {
+        contentStr = this.safeStringify(content);
+      }
 
       // Heuristic: If content is very long and doesn't look like tool output, might be text
       // Tool results from view_image typically start with specific patterns
@@ -1431,6 +1492,14 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
            content.startsWith('[') ||
            content.length < 10000)) {
         this.outputChannel.appendLine(`  Found tool result (duck-typed): callId=${anyPart.callId}, contentLength=${contentStr.length}`);
+        toolResults.push({
+          tool_call_id: anyPart.callId,
+          role: 'tool',
+          content: contentStr,
+        });
+      } else if (Array.isArray(content)) {
+        // Array content - likely tool result with mixed text/data
+        this.outputChannel.appendLine(`  Found tool result (duck-typed, array): callId=${anyPart.callId}, contentLength=${contentStr.length}`);
         toolResults.push({
           tool_call_id: anyPart.callId,
           role: 'tool',
@@ -1458,7 +1527,32 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       this.outputChannel.appendLine(`  [DuckType Unknown] Part could not be classified. Keys: [${partKeys}]`);
       // Try to extract any string content as fallback
       if ('content' in anyPart) {
-        const fallback = typeof anyPart.content === 'string' ? anyPart.content : this.safeStringify(anyPart.content);
+        const content = anyPart.content;
+        let fallback: string;
+        if (Array.isArray(content)) {
+          // Handle array - extract text parts, summarize data parts
+          const parts: string[] = [];
+          for (const item of content) {
+            if (typeof item === 'string') {
+              parts.push(item);
+            } else if (item && typeof item === 'object') {
+              if ('value' in item && typeof item.value === 'string') {
+                parts.push(item.value);
+              } else if ('mimeType' in item && 'data' in item) {
+                parts.push(`[Data: ${item.mimeType}, ${item.data?.length || 0} bytes]`);
+              } else {
+                parts.push(this.safeStringify(item));
+              }
+            } else {
+              parts.push(String(item));
+            }
+          }
+          fallback = parts.join('');
+        } else if (typeof content === 'string') {
+          fallback = content;
+        } else {
+          fallback = this.safeStringify(content);
+        }
         contentParts.push({ type: 'text', text: fallback });
       }
     }

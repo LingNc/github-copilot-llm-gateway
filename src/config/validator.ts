@@ -181,9 +181,10 @@ export function validateProviderConfig(
     }
   }
 
-  if (!provider.models || typeof provider.models !== 'object') {
-    errors.push({ path: `${path}.${providerId}.models`, message: 'Provider models is required and must be an object' });
-  } else {
+  // Models is optional - if not provided, will be fetched from API
+  if (provider.models !== undefined && typeof provider.models !== 'object') {
+    errors.push({ path: `${path}.${providerId}.models`, message: 'Provider models must be an object if provided' });
+  } else if (provider.models) {
     // Validate each model
     const models = provider.models as Record<string, unknown>;
     for (const [modelId, modelConfig] of Object.entries(models)) {

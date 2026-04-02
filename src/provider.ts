@@ -45,6 +45,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   // Cache debug logs setting to avoid repeated config lookups
   private debugLogsEnabled = false;
   private tokenDebugLogsEnabled = false;
+  private messageDebugLogsEnabled = false;
   // Status bar item for token usage display
   private tokenStatusBarItem: vscode.StatusBarItem | undefined;
   // Current session token statistics
@@ -335,6 +336,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     const config = vscode.workspace.getConfiguration('github.copilot.llm-gateway');
     this.debugLogsEnabled = config.get<boolean>('enableDebugLogs', false);
     this.tokenDebugLogsEnabled = config.get<boolean>('enableTokenDebugLogs', false);
+    this.messageDebugLogsEnabled = config.get<boolean>('enableMessageDebugLogs', false);
   }
 
   /**
@@ -472,24 +474,31 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       const toolCalls: Record<string, unknown>[] = [];
       const contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
 
-      // Debug: log message content types with MORE detail
-      const contentTypes = msg.content.map((p: unknown) => {
-        if (p instanceof vscode.LanguageModelTextPart) return 'text';
-        if (p instanceof vscode.LanguageModelDataPart) return 'data';
-        if (p instanceof vscode.LanguageModelToolResultPart) return 'tool_result';
-        if (p instanceof vscode.LanguageModelToolCallPart) return 'tool_call';
-        return 'unknown';
-      });
-      this.outputChannel.appendLine(`[Message Debug] role=${role}, contentTypes=[${contentTypes.join(', ')}], contentCount=${msg.content.length}`);
+      // Debug: log message content types (only when debug enabled)
+      if (this.debugLogsEnabled) {
+        const contentTypes = msg.content.map((p: unknown) => {
+          if (p instanceof vscode.LanguageModelTextPart) return 'text';
+          if (p instanceof vscode.LanguageModelDataPart) return 'data';
+          if (p instanceof vscode.LanguageModelToolResultPart) return 'tool_result';
+          if (p instanceof vscode.LanguageModelToolCallPart) return 'tool_call';
+          return 'unknown';
+        });
+        this.outputChannel.appendLine(`[Message Debug] role=${role}, contentTypes=[${contentTypes.join(', ')}], contentCount=${msg.content.length}`);
+      }
 
       for (let i = 0; i < msg.content.length; i++) {
         const part = msg.content[i];
         const partType = part.constructor.name;
-        this.outputChannel.appendLine(`[Part Debug] Index ${i}: type=${partType}`);
 
         if (part instanceof vscode.LanguageModelTextPart) {
-          const textPreview = part.value.substring(0, 100).replace(/\n/g, '\\n');
-          this.outputChannel.appendLine(`[Part Debug]   TextPart: length=${part.value.length}, preview="${textPreview}..."`);
+          // Only show detailed preview when message debug is enabled
+          if (this.messageDebugLogsEnabled) {
+            const textPreview = part.value.substring(0, 100).replace(/\n/g, '\\n');
+            this.outputChannel.appendLine(`[Part Debug] Index ${i}: type=${partType}`);
+            this.outputChannel.appendLine(`[Part Debug]   TextPart: length=${part.value.length}, preview="${textPreview}..."`);
+          } else if (this.debugLogsEnabled) {
+            this.outputChannel.appendLine(`[Part Debug] Index ${i}: type=${partType}, length=${part.value.length}`);
+          }
           contentParts.push({ type: 'text', text: part.value });
           // Count as messages (this includes regular text and file references)
           messagesTokens += await this.provideTokenCount(model, part.value, token);
@@ -499,16 +508,22 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
             const base64Data = Buffer.from(part.data).toString('base64');
             const imageUrl = `data:${part.mimeType};base64,${base64Data}`;
             contentParts.push({ type: 'image_url', image_url: { url: imageUrl } });
-            this.outputChannel.appendLine(`  Added image: ${part.mimeType}, ${part.data.length} bytes`);
+            if (this.debugLogsEnabled) {
+              this.outputChannel.appendLine(`[Part Debug]   Added image: ${part.mimeType}, ${part.data.length} bytes`);
+            }
             // Calculate image tokens based on dimensions
             const estimatedImageTokens = this.calculateImageTokens(part.data, part.mimeType);
             filesTokens += estimatedImageTokens;
-            this.outputChannel.appendLine(`  Estimated image tokens: ${estimatedImageTokens}`);
+            if (this.debugLogsEnabled) {
+              this.outputChannel.appendLine(`[Part Debug]   Estimated image tokens: ${estimatedImageTokens}`);
+            }
           } else {
             // Handle other file types as text content
             const text = Buffer.from(part.data).toString('utf-8');
             contentParts.push({ type: 'text', text });
-            this.outputChannel.appendLine(`  Added file: ${part.mimeType}, ${part.data.length} bytes`);
+            if (this.debugLogsEnabled) {
+              this.outputChannel.appendLine(`[Part Debug]   Added file: ${part.mimeType}, ${part.data.length} bytes`);
+            }
             // Count file content tokens
             const fileTokens = await this.provideTokenCount(model, text, token);
             filesTokens += fileTokens;
@@ -521,9 +536,11 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           const toolResultText = toolResult.content as string;
           const textLength = toolResultText.length;
 
-          // DEBUG: Log tool result size
-          const preview = textLength > 200 ? toolResultText.substring(0, 200).replace(/\n/g, '\\n') : toolResultText.replace(/\n/g, '\\n');
-          this.outputChannel.appendLine(`[Tool Result Debug] callId=${part.callId}, length=${textLength}, preview="${preview}..."`);
+          // DEBUG: Log tool result size (only when debug enabled)
+          if (this.debugLogsEnabled) {
+            const preview = textLength > 200 ? toolResultText.substring(0, 200).replace(/\n/g, '\\n') : toolResultText.replace(/\n/g, '\\n');
+            this.outputChannel.appendLine(`[Tool Result Debug] callId=${part.callId}, length=${textLength}, preview="${preview}..."`);
+          }
 
           // Check if content is base64 image data (from view_image tool)
           if (toolResultText.startsWith('data:image/')) {
@@ -536,27 +553,40 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
               const estimatedTokens = this.calculateImageTokens(new Uint8Array(byteLength), mimeType);
               toolResultsTokens += estimatedTokens;
               this.logService.debug('Token', `Tool result image: ${mimeType}, ~${estimatedTokens} tokens`);
-              this.outputChannel.appendLine(`[Tool Result Debug] Detected image data: ${mimeType}, base64 length=${base64Data.length}, estimated tokens=${estimatedTokens}`);
+              if (this.debugLogsEnabled) {
+                this.outputChannel.appendLine(`[Tool Result Debug] Detected image data: ${mimeType}, base64 length=${base64Data.length}, estimated tokens=${estimatedTokens}`);
+              }
             } else {
               const tokens = await this.provideTokenCount(model, toolResultText, token);
               toolResultsTokens += tokens;
-              this.outputChannel.appendLine(`[Tool Result Debug] Non-standard image format, counted as text: ${tokens} tokens`);
+              if (this.debugLogsEnabled) {
+                this.outputChannel.appendLine(`[Tool Result Debug] Non-standard image format, counted as text: ${tokens} tokens`);
+              }
             }
           } else {
             const tokens = await this.provideTokenCount(model, toolResultText, token);
             toolResultsTokens += tokens;
-            this.outputChannel.appendLine(`[Tool Result Debug] Counted as text: ${tokens} tokens`);
+            if (this.debugLogsEnabled) {
+              this.outputChannel.appendLine(`[Tool Result Debug] Counted as text: ${tokens} tokens`);
+            }
           }
         } else if (part instanceof vscode.LanguageModelToolCallPart) {
+          if (this.debugLogsEnabled) {
+            this.outputChannel.appendLine(`[Part Debug]   ToolCall: ${part.name}, callId=${part.callId}`);
+          }
           toolCalls.push(this.convertToolCallPart(part));
         } else {
           // Fallback for unknown part types that failed instanceof check
           const anyPart = part as Record<string, unknown>;
-          this.outputChannel.appendLine(`[Part Debug] Unknown part type: ${part.constructor.name}, keys: [${Object.keys(anyPart).join(', ')}]`);
+          if (this.debugLogsEnabled) {
+            this.outputChannel.appendLine(`[Part Debug] Unknown part type: ${part.constructor.name}, keys: [${Object.keys(anyPart).join(', ')}]`);
+          }
 
           // Try to extract text content if it has a 'value' property (likely TextPart)
           if ('value' in anyPart && typeof anyPart.value === 'string') {
-            this.outputChannel.appendLine(`[Part Debug]   Treating as text (has value property): length=${anyPart.value.length}`);
+            if (this.debugLogsEnabled) {
+              this.outputChannel.appendLine(`[Part Debug]   Treating as text (has value property): length=${anyPart.value.length}`);
+            }
             contentParts.push({ type: 'text', text: anyPart.value });
             messagesTokens += await this.provideTokenCount(model, anyPart.value, token);
           } else if ('content' in anyPart) {
@@ -593,7 +623,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
             }
 
             if ('callId' in anyPart && !('name' in anyPart)) {
-              this.outputChannel.appendLine(`[Part Debug]   Treating as tool result (duck-typed): callId=${anyPart.callId}, contentLength=${contentStr.length}`);
+              if (this.debugLogsEnabled) {
+                this.outputChannel.appendLine(`[Part Debug]   Treating as tool result (duck-typed): callId=${anyPart.callId}, contentLength=${contentStr.length}`);
+              }
               toolResults.push({
                 tool_call_id: anyPart.callId,
                 role: 'tool',
@@ -601,7 +633,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
               });
               toolResultsTokens += await this.provideTokenCount(model, contentStr, token);
             } else {
-              this.outputChannel.appendLine(`[Part Debug]   Treating as text from content property`);
+              if (this.debugLogsEnabled) {
+                this.outputChannel.appendLine(`[Part Debug]   Treating as text from content property`);
+              }
               contentParts.push({ type: 'text', text: contentStr });
               messagesTokens += await this.provideTokenCount(model, contentStr, token);
             }
@@ -1491,7 +1525,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
            content.startsWith('{') ||
            content.startsWith('[') ||
            content.length < 10000)) {
-        this.outputChannel.appendLine(`  Found tool result (duck-typed): callId=${anyPart.callId}, contentLength=${contentStr.length}`);
+        if (this.debugLogsEnabled) {
+          this.outputChannel.appendLine(`  Found tool result (duck-typed): callId=${anyPart.callId}, contentLength=${contentStr.length}`);
+        }
         toolResults.push({
           tool_call_id: anyPart.callId,
           role: 'tool',
@@ -1499,7 +1535,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         });
       } else if (Array.isArray(content)) {
         // Array content - likely tool result with mixed text/data
-        this.outputChannel.appendLine(`  Found tool result (duck-typed, array): callId=${anyPart.callId}, contentLength=${contentStr.length}`);
+        if (this.debugLogsEnabled) {
+          this.outputChannel.appendLine(`  Found tool result (duck-typed, array): callId=${anyPart.callId}, contentLength=${contentStr.length}`);
+        }
         toolResults.push({
           tool_call_id: anyPart.callId,
           role: 'tool',
@@ -1507,12 +1545,16 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         });
       } else {
         // If it doesn't look like a tool result, log and treat as unknown
-        this.outputChannel.appendLine(`  [DuckType Warning] Part with callId looks like text, not tool result. Adding as text.`);
+        if (this.debugLogsEnabled) {
+          this.outputChannel.appendLine(`  [DuckType Warning] Part with callId looks like text, not tool result. Adding as text.`);
+        }
         contentParts.push({ type: 'text', text: contentStr });
       }
     } else if ('callId' in anyPart && 'name' in anyPart && 'input' in anyPart) {
       // Tool call is more reliable to identify
-      this.outputChannel.appendLine(`  Found tool call (duck-typed): callId=${anyPart.callId}, name=${anyPart.name}`);
+      if (this.debugLogsEnabled) {
+        this.outputChannel.appendLine(`  Found tool call (duck-typed): callId=${anyPart.callId}, name=${anyPart.name}`);
+      }
       toolCalls.push({
         id: anyPart.callId,
         type: 'function',
@@ -1520,11 +1562,15 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       });
     } else if ('value' in anyPart && typeof anyPart.value === 'string') {
       // Likely a text part that failed instanceof check
-      this.outputChannel.appendLine(`  Found text part (duck-typed): length=${anyPart.value.length}`);
+      if (this.debugLogsEnabled) {
+        this.outputChannel.appendLine(`  Found text part (duck-typed): length=${anyPart.value.length}`);
+      }
       contentParts.push({ type: 'text', text: anyPart.value });
     } else {
       // Truly unknown - log for debugging
-      this.outputChannel.appendLine(`  [DuckType Unknown] Part could not be classified. Keys: [${partKeys}]`);
+      if (this.debugLogsEnabled) {
+        this.outputChannel.appendLine(`  [DuckType Unknown] Part could not be classified. Keys: [${partKeys}]`);
+      }
       // Try to extract any string content as fallback
       if ('content' in anyPart) {
         const content = anyPart.content;
@@ -1569,7 +1615,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     for (const part of msg.content) {
       if (part instanceof vscode.LanguageModelTextPart) {
-        this.outputChannel.appendLine(`  Found text part: ${part.value.substring(0, 100)}${part.value.length > 100 ? '...' : ''}`);
+        if (this.debugLogsEnabled) {
+          this.outputChannel.appendLine(`  Found text part: ${part.value.substring(0, 100)}${part.value.length > 100 ? '...' : ''}`);
+        }
         contentParts.push({ type: 'text', text: part.value });
       } else if (part instanceof vscode.LanguageModelDataPart) {
         // Handle image data
@@ -1577,17 +1625,25 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           const base64Data = Buffer.from(part.data).toString('base64');
           const imageUrl = `data:${part.mimeType};base64,${base64Data}`;
           contentParts.push({ type: 'image_url', image_url: { url: imageUrl } });
-          this.outputChannel.appendLine(`  Found image: ${part.mimeType}, ${part.data.length} bytes`);
+          if (this.debugLogsEnabled) {
+            this.outputChannel.appendLine(`  Found image: ${part.mimeType}, ${part.data.length} bytes`);
+          }
         } else {
           const text = Buffer.from(part.data).toString('utf-8');
           contentParts.push({ type: 'text', text });
-          this.outputChannel.appendLine(`  Found data part: ${part.mimeType}, ${part.data.length} bytes`);
+          if (this.debugLogsEnabled) {
+            this.outputChannel.appendLine(`  Found data part: ${part.mimeType}, ${part.data.length} bytes`);
+          }
         }
       } else if (part instanceof vscode.LanguageModelToolResultPart) {
-        this.outputChannel.appendLine(`  Found tool result: callId=${part.callId}`);
+        if (this.debugLogsEnabled) {
+          this.outputChannel.appendLine(`  Found tool result: callId=${part.callId}`);
+        }
         toolResults.push(this.convertToolResultPart(part));
       } else if (part instanceof vscode.LanguageModelToolCallPart) {
-        this.outputChannel.appendLine(`  Found tool call: callId=${part.callId}, name=${part.name}`);
+        if (this.debugLogsEnabled) {
+          this.outputChannel.appendLine(`  Found tool call: callId=${part.callId}, name=${part.name}`);
+        }
         toolCalls.push(this.convertToolCallPart(part));
       } else {
         this.processPartDuckTyped(part, toolResults, toolCalls, contentParts);
@@ -2028,9 +2084,11 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       Object.assign(requestOptions, options.modelOptions);
     }
 
-    // Log request
-    const debugRequest = this.safeStringify(requestOptions);
-    this.outputChannel.appendLine(debugRequest.length > 2000 ? `Request (truncated): ${debugRequest.substring(0, 2000)}...` : `Request: ${debugRequest}`);
+    // Log request (only when message debug enabled)
+    if (this.messageDebugLogsEnabled) {
+      const debugRequest = this.safeStringify(requestOptions);
+      this.outputChannel.appendLine(debugRequest.length > 2000 ? `Request (truncated): ${debugRequest.substring(0, 2000)}...` : `Request: ${debugRequest}`);
+    }
 
     try {
       let totalContent = '';

@@ -221,12 +221,19 @@
           "markdownDescription": "%config.enableTokenDebugLogs.markdownDescription%",
           "order": 14
         },
+        "github.copilot.llm-gateway.enableMessageDebugLogs": {
+          "type": "boolean",
+          "default": false,
+          "description": "%config.enableMessageDebugLogs.description%",
+          "markdownDescription": "%config.enableMessageDebugLogs.markdownDescription%",
+          "order": 15
+        },
         "github.copilot.llm-gateway.enableTokenStatistics": {
           "type": "boolean",
           "default": true,
           "description": "%config.enableTokenStatistics.description%",
           "markdownDescription": "%config.enableTokenStatistics.markdownDescription%",
-          "order": 15
+          "order": 16
         },
         "github.copilot.llm-gateway.logLevel": {
           "type": "string",

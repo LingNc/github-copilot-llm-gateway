@@ -27,7 +27,7 @@ export class ConfigManager {
   private currentConfig: MultiProviderConfig;
   private onConfigChanged: (config: MultiProviderConfig) => void;
 
-  private debounceTimer: NodeJS.Timeout | undefined;
+  private configChangedPending = false;
 
   constructor(
     outputChannel: vscode.OutputChannel,
@@ -38,8 +38,10 @@ export class ConfigManager {
     this.config = vscode.workspace.getConfiguration(CONFIG_SECTION);
     this.currentConfig = this.loadConfig();
 
-    // Watch for configuration changes with debounce
+    // Watch for configuration changes (defer reload until settings editor closes)
     vscode.workspace.onDidChangeConfiguration(this.handleConfigChange.bind(this));
+    // Reload when leaving settings editor
+    vscode.window.onDidChangeActiveTextEditor(this.handleEditorChange.bind(this));
   }
 
   /**
@@ -237,19 +239,28 @@ export class ConfigManager {
   }
 
   /**
-   * Handle configuration changes with debounce
+   * Handle configuration changes (mark as pending, reload when leaving settings)
    */
   private handleConfigChange(event: vscode.ConfigurationChangeEvent): void {
     if (event.affectsConfiguration(CONFIG_SECTION)) {
-      // Clear existing timer to debounce rapid changes
-      if (this.debounceTimer) {
-        clearTimeout(this.debounceTimer);
-      }
-      // Delay reload to avoid UI jumping during settings editing
-      this.debounceTimer = setTimeout(() => {
-        this.outputChannel.appendLine('Configuration changed, reloading...');
+      this.configChangedPending = true;
+      this.outputChannel.appendLine('Configuration changed, will reload when you close settings...');
+    }
+  }
+
+  /**
+   * Handle editor change - reload config when leaving settings
+   */
+  private handleEditorChange(editor: vscode.TextEditor | undefined): void {
+    // If we have pending changes and we're NOT in settings anymore, reload
+    if (this.configChangedPending) {
+      const isInSettings = editor?.document?.uri?.scheme === 'vscode-settings' ||
+                          vscode.window.activeTextEditor?.document?.uri?.scheme === 'vscode-settings';
+      if (!isInSettings) {
+        this.configChangedPending = false;
+        this.outputChannel.appendLine('Leaving settings, reloading configuration...');
         this.reloadConfig();
-      }, 500);
+      }
     }
   }
 

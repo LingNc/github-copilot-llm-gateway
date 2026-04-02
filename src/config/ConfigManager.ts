@@ -101,6 +101,7 @@ export class ConfigManager {
     const models: ResolvedModel[] = [];
 
     for (const [providerId, provider] of Object.entries(this.currentConfig.providers)) {
+      if (!provider.models) continue;
       for (const [modelId, model] of Object.entries(provider.models)) {
         models.push({
           ...model,
@@ -119,7 +120,7 @@ export class ConfigManager {
    */
   public getModelsForProvider(providerId: string): ResolvedModel[] {
     const provider = this.currentConfig.providers[providerId];
-    if (!provider) {
+    if (!provider || !provider.models) {
       return [];
     }
 
@@ -136,7 +137,7 @@ export class ConfigManager {
    */
   public getModel(providerId: string, modelId: string): ResolvedModel | undefined {
     const provider = this.currentConfig.providers[providerId];
-    if (!provider) {
+    if (!provider || !provider.models) {
       return undefined;
     }
 
@@ -213,7 +214,7 @@ export class ConfigManager {
     } else {
       const providerCount = Object.keys(providers).length;
       const modelCount = Object.values(providers).reduce(
-        (sum, p) => sum + Object.keys(p.models).length,
+        (sum, p) => sum + (p.models ? Object.keys(p.models).length : 0),
         0
       );
       this.outputChannel.appendLine(

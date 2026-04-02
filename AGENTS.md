@@ -59,15 +59,18 @@ npm run package
 - [x] 配置文件支持和热重载
 - [x] 中英双语支持
 - [x] Anthropic API 支持
-- [x] 模型 thinking 配置支持
+- [x] 模型 thinking 配置支持（含思考等级 effort）
 - [x] Copilot 上下文 token 显示修复（通过 progress.usage() 报告）
 - [x] Claude 3.7 Thinking 内容支持
 - [x] **计划 1**: Token 分类统计完善（Files 和 Tool Results）
-- [ ] 模型思考等级配置支持（Kimi/Qwen）
-- [ ] **计划 2**: Token 估算算法优化（precise/fast-estimate/none 模式）
-- [ ] **计划 3**: 切换模型时自动隐藏 Token 状态栏
-- [ ] **计划 4**: 模型上下文长度显示异常问题排查
-- [ ] **计划 5**: 整理上下文按钮样式优化
+- [x] **问题修复**: 思考等级本地化（使用英文原文作为l10n key）
+- [x] **问题修复**: config-priority模式优化（有配置时跳过API请求）
+- [ ] **问题排查**: 模型重复显示（VS Code/Copilot缓存问题）
+- [ ] **计划 2**: 后台输出优化（日志级别、美化格式、工具信息简化）
+- [ ] **计划 3**: Token 估算算法优化（precise/fast-estimate/none 模式）
+- [ ] **计划 4**: 切换模型时自动隐藏 Token 状态栏
+- [ ] **计划 5**: 模型上下文长度显示异常问题排查
+- [ ] **计划 6**: 整理上下文按钮样式优化
 - [ ] 完整测试和 bug 修复
 
 ### 未来计划（暂不实装）
@@ -90,7 +93,72 @@ npm run package
 
 ---
 
-#### 计划 2: Token 估算算法优化
+#### 计划 2: 后台输出优化
+
+**目标**: 优化 LLM Gateway 后台输出面板的日志显示，提升可读性和调试效率
+
+**当前问题**:
+1. **工具信息过于冗长**: 发送工具列表时显示完整的工具定义（如 "Tool: get_task_output\n  Description: Get the output of a task..."），占用大量空间且难以快速扫描
+2. **缺乏日志级别区分**: 所有输出混在一起，无法区分 INFO、DEBUG、WARNING、ERROR 等级别
+3. **格式不统一**: 不同部分的输出风格不一致，难以快速定位关键信息
+
+**优化方案**:
+
+1. **简化工具信息显示**
+   - 正常模式: `发送 45 个工具到模型 (parallel: true)`，省略详细工具定义
+   - 详细模式（可配置）: 显示完整工具信息，包括描述和参数
+   - 格式示例:
+     ```
+     [Tools] 发送 45 个工具 (parallel: true)
+     [Tools] 示例: get_task_output, get_terminal_output, run_in_terminal...
+     ```
+
+2. **引入日志级别系统**
+   - 添加配置项 `logLevel`: `'error' | 'warning' | 'info' | 'debug'`
+   - 各级别输出内容:
+     - `error`: 仅错误信息
+     - `warning`: 警告和错误
+     - `info`: 关键流程信息（默认）
+     - `debug`: 详细信息，包括工具定义、Token 计算细节等
+
+3. **统一输出格式**
+   - 使用标签前缀区分类型:
+     - `[Request]` - 请求相关
+     - `[Response]` - 响应相关
+     - `[Token]` - Token 统计
+     - `[Tool]` - 工具调用
+     - `[Config]` - 配置信息
+     - `[Error]` - 错误信息
+   - 关键信息高亮（使用 VS Code 主题色）
+   - 时间戳可选显示
+
+4. **可折叠/展开的长内容**
+   - 对于请求体、响应体等长内容，使用折叠格式显示
+   - 示例:
+     ```
+     [Request] POST /v1/chat/completions (展开 ▼)
+     ```
+
+**配置示例**:
+```json
+{
+  "github.copilot.llm-gateway.logLevel": "info",
+  "github.copilot.llm-gateway.showTimestamps": true,
+  "github.copilot.llm-gateway.detailedToolInfo": false
+}
+```
+
+**实现位置**:
+- `src/provider.ts`: 所有 `this.outputChannel.appendLine()` 调用
+- `src/extension.ts`: 初始化日志配置
+
+**预估工作量**: 3-4 小时
+
+**优先级**: 中（提升开发调试体验）
+
+---
+
+#### 计划 3: Token 估算算法优化
 
 **目标**: 提供可配置的 Token 计算模式，平衡精确度和性能
 
@@ -129,7 +197,7 @@ npm run package
 
 ---
 
-#### 计划 3: 切换模型时自动隐藏 Token 状态栏
+#### 计划 4: 切换模型时自动隐藏 Token 状态栏
 
 **需求描述**: 当用户在 Copilot Chat 中切换到非 LLM Gateway 提供的模型时，自动隐藏当前显示的 Token 状态栏
 
@@ -159,7 +227,7 @@ npm run package
 
 ---
 
-#### 计划 4: 模型上下文长度显示异常问题排查
+#### 计划 5: 模型上下文长度显示异常问题排查
 
 **问题描述**: 在 Copilot Chat 模型选择界面中，LLM Gateway 配置的模型上下文长度显示比实际值偏大
 - 示例 1: 实际 1M (1,000,000) → 显示 1.1M
@@ -188,7 +256,7 @@ npm run package
 
 ---
 
-#### 计划 5: 整理上下文按钮样式优化
+#### 计划 6: 整理上下文按钮样式优化
 
 **当前状态**:
 当前 tooltip 底部的"整理对话上下文"显示为 Markdown 超链接 `[整理对话上下文](command:...)`
@@ -216,6 +284,65 @@ npm run package
 **预估工作量**: 1-2 小时
 
 **优先级**: 低（UI 美化）
+
+---
+
+### 已知问题
+
+#### 模型重复显示问题
+
+**症状**: 在模型选择器中，每个模型显示两次
+
+**分析**:
+- 在全新 VS Code 实例（其他电脑）上测试正常，说明扩展代码本身无重复
+- 问题仅在当前 VS Code 实例出现，可能是 VS Code 或 Copilot Chat 内部缓存导致
+- 日志显示每次调用返回的模型数量正确，无重复 ID
+
+**解决方案**:
+1. **清除 Copilot Chat 缓存**（最有效）：
+   ```bash
+   # 关闭 VS Code
+   rm -rf ~/.vscode-server/data/User/globalStorage/github.copilot-chat/*
+   rm -rf ~/.vscode-server/data/CachedExtensionVSIXs/*copilot*
+   # 重新启动 VS Code
+   ```
+
+2. **清除 VS Code 工作区缓存**：
+   ```bash
+   rm -rf ~/.vscode-server/data/User/workspaceStorage/*/state.vscdb
+   rm -rf ~/.vscode-server/data/User/workspaceStorage/*/state.vscdb.backup
+   ```
+
+3. **完全重装扩展**：
+   ```bash
+   # 在 VS Code 中卸载 LLM Gateway 扩展
+   # 删除所有残留文件
+   rm -rf ~/.vscode-server/extensions/andrewbutson.github-copilot-llm-gateway-*
+   rm -rf ~/.vscode-server/data/CachedExtensionVSIXs/andrewbutson.github-copilot-llm-gateway-*
+   # 重启 VS Code，重新安装扩展
+   ```
+
+---
+
+#### l10n 本地化问题（已修复）
+
+**问题**: `vscode.l10n.t()` 显示翻译 key 而不是实际文本
+
+**原因**: 参考 Copilot Chat 源码发现，l10n 应该使用英文原文作为 key，而不是 dot-notation key
+
+**修复**:
+- 代码中：`vscode.l10n.t('Thinking Effort')`（英文原文）
+- package.nls.json: `"Thinking Effort": "Thinking Effort"`
+- package.nls.zh-cn.json: `"Thinking Effort": "思考等级"`
+
+---
+
+### 扩展依赖
+
+**GitHub Copilot Chat**: 本扩展依赖 Copilot Chat 扩展提供的基础功能
+- 安装本扩展前需先安装 GitHub Copilot Chat
+- 卸载 Copilot Chat 时连带卸载本扩展
+- 在 `package.json` 中声明为 `extensionDependencies`
 
 ---
 
@@ -312,19 +439,73 @@ OpenAI/Anthropic Compatible Server (vLLM/Ollama/Anthropic/etc)
       "apiKey": "YOUR_API_KEY",
       "apiFormat": "anthropic",
       "models": {
-        "claude-3-5-sonnet-20241022": {
-          "name": "Claude 3.5 Sonnet",
+        "claude-3-7-sonnet-20250219": {
+          "name": "Claude 3.7 Sonnet",
           "limit": { "context": 200000, "output": 8192 },
+          "options": { "thinking": { "type": "enabled", "budgetTokens": 16000, "effort": "high" } },
+          "capabilities": { "toolCalling": true, "vision": true }
+        }
+      }
+    },
+    "openai": {
+      "name": "OpenAI",
+      "baseURL": "https://api.openai.com/v1",
+      "apiKey": "YOUR_API_KEY",
+      "apiFormat": "openai",
+      "models": {
+        "o3-mini": {
+          "name": "o3-mini",
+          "limit": { "context": 128000, "output": 32768 },
+          "options": { "thinking": { "type": "enabled", "effort": "medium" } },
           "capabilities": { "toolCalling": true, "vision": true }
         }
       }
     }
-  },
-  "github.copilot.llm-gateway.showProviderPrefix": true,
-  "github.copilot.llm-gateway.providerNameStyle": "slash",
-  "github.copilot.llm-gateway.configMode": "config-priority"
+  }
 }
 ```
+
+### thinking 配置说明
+
+支持思考能力的模型（如 Claude 3.7, o1/o3, Kimi, Qwen, DeepSeek）可以配置思考模式：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `type` | `'enabled' \| 'disabled'` | 是否启用思考（必须） |
+| `budgetTokens` | `number` | 思考预算 token 数（可选，Anthropic 专用） |
+| `effort` | `'low' \| 'medium' \| 'high'` | 默认思考等级（可选） |
+| `levels` | `('low' \| 'medium' \| 'high')[]` | 可选思考等级列表（可选） |
+
+**模型选择器下拉菜单逻辑**:
+- **`type: 'enabled'` + `levels` 配置**: 在 VS Code 模型选择器显示"Thinking Effort"下拉菜单，用户可实时选择
+- **`type: 'enabled'` 无 `levels`**: 启用思考但不显示下拉菜单（适用于无分级思考的模型，如 DeepSeek）
+- **无 `thinking` 配置**: 不显示任何思考相关选项
+
+**配置示例 - 支持分级的模型（Claude 3.7, o1/o3）**:
+```json
+"options": {
+  "thinking": {
+    "type": "enabled",
+    "budgetTokens": 16000,
+    "effort": "high",
+    "levels": ["low", "medium", "high"]
+  }
+}
+```
+
+**配置示例 - 仅支持思考模式无分级（DeepSeek）**:
+```json
+"options": {
+  "thinking": {
+    "type": "enabled"
+  }
+}
+```
+
+**不同 API 格式的处理**:
+- **Anthropic**: 使用 `thinking` 对象（含 `budget_tokens`）
+- **OpenAI (o1/o3)**: 使用 `reasoning_effort` 字段
+- **Kimi/Qwen/DeepSeek**: 根据 API 格式自动适配
 
 ### apiFormat 说明
 
@@ -375,6 +556,68 @@ OpenAI/Anthropic Compatible Server (vLLM/Ollama/Anthropic/etc)
 🛠️ AGENTS.md -> 添加 Git 提交规范
 🛠️ src/provider.ts -> 修复栈溢出问题
 ```
+
+---
+
+### 发布规范
+
+当 develop 上累积了足够的更新，合并到 main（排除 AGENTS.md 等开发文档），打标签，完成一个版本的发布。
+
+**版本号规范**：`v主版本.次版本.修订版本`，例如 `v1.1.3`
+- 主版本：重大架构变更
+- 次版本：新功能添加
+- 修订版本：bug 修复或小改进
+
+```bash
+# 1. 切换到 main 分支
+git checkout main
+
+# 2. 合并 develop，但强制生成合并节点 (--no-ff)，且暂停提交 (--no-commit)
+# --no-ff: 即使可以快进，也强制生成一个 commit 节点，确保 main 上有一个独立的版本点
+# --no-commit: 合并后暂不生成 commit，给你机会去删除不需要的文件
+git merge --no-ff --no-commit develop
+
+# 3. 排除不需要发布的文件
+# AGENTS.md 是开发文档，不发布到 main
+git reset HEAD AGENTS.md 2>/dev/null || true
+rm -f AGENTS.md
+
+# 4. 提交合并，生成版本节点
+# 提交信息格式：release: vx.x.x 简要描述
+git commit -m "release: vx.x.x 简要描述"
+
+# 5. 打标签
+# 标签信息格式：vx.x.x -> 简要描述
+git tag -a vx.x.x -m "vx.x.x -> 简要描述"
+
+# 6. 推送
+git push origin main --tags
+
+# 7. 构建并发布 Release
+# 构建项目
+npm run package
+
+# 创建 GitHub Release
+# 标题格式：vx.x.x（仅版本号）
+# 内容格式：包含更新内容的描述和 Full Changelog 链接
+gh release create vx.x.x --title "vx.x.x" --notes "## 更新内容
+
+- 功能1描述
+- 功能2描述
+
+**Full Changelog**: https://github.com/LingNc/github-copilot-llm-gateway/compare/v上一个版本...vx.x.x"
+```
+
+**发布前检查清单**：
+- [ ] 所有功能已在 develop 分支测试通过
+- [ ] 版本号已更新（遵循版本号规范）
+- [ ] AGENTS.md 和开发进度文档已更新
+- [ ] 变更日志已记录本次更新内容
+
+**发布后检查**：
+- [ ] Release 页面可正常访问
+- [ ] 构建文件可正常下载
+- [ ] 版本标签指向正确的提交
 
 ### 维护责任
 - 每次会话开始前，AI 工具应优先读取 AGENTS.md 了解项目状态。

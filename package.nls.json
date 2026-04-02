@@ -63,4 +63,8 @@
   "token.close": "Close",
   "token.noActiveSession": "No active session to compact",
   "token.statusBarTooltip": "Token Usage: {0} / {1} ({2}%)\nClick for details & compact",
+  "Thinking Effort": "Thinking Effort",
+  "Faster responses with less reasoning": "Faster responses with less reasoning",
+  "Balanced reasoning and speed": "Balanced reasoning and speed",
+  "Maximum reasoning depth": "Maximum reasoning depth"
 }

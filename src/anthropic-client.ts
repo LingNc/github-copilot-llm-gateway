@@ -61,6 +61,14 @@ export class AnthropicClient {
    * Note: Anthropic doesn't have a /models endpoint, so we return models from config
    */
   public async fetchModels(): Promise<{ object: string; data: Array<{ id: string; object: string; created: number; owned_by: string }> }> {
+    // Return empty list if no models configured (will be fetched from API for non-Anthropic formats)
+    if (!this.config.models) {
+      return {
+        object: 'list',
+        data: [],
+      };
+    }
+
     const models = Object.entries(this.config.models).map(([id, modelConfig]) => ({
       id,
       object: 'model',
@@ -269,6 +277,11 @@ export class AnthropicClient {
       temperature: request.temperature,
       stream: true,
     };
+
+    // Add optional parameters if provided
+    if (request.top_p !== undefined) {
+      anthropicRequest.top_p = request.top_p;
+    }
 
     if (request.tools && request.tools.length > 0) {
       anthropicRequest.tools = this.convertTools(request.tools);

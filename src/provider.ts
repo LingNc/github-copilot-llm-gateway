@@ -495,6 +495,33 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           }
         } else if (part instanceof vscode.LanguageModelToolCallPart) {
           toolCalls.push(this.convertToolCallPart(part));
+        } else {
+          // Fallback for unknown part types that failed instanceof check
+          const anyPart = part as Record<string, unknown>;
+          this.outputChannel.appendLine(`[Part Debug] Unknown part type: ${part.constructor.name}, keys: [${Object.keys(anyPart).join(', ')}]`);
+
+          // Try to extract text content if it has a 'value' property (likely TextPart)
+          if ('value' in anyPart && typeof anyPart.value === 'string') {
+            this.outputChannel.appendLine(`[Part Debug]   Treating as text (has value property): length=${anyPart.value.length}`);
+            contentParts.push({ type: 'text', text: anyPart.value });
+            messagesTokens += await this.provideTokenCount(model, anyPart.value, token);
+          } else if ('content' in anyPart) {
+            // Might be a tool result that failed instanceof
+            const contentStr = typeof anyPart.content === 'string' ? anyPart.content : this.safeStringify(anyPart.content);
+            if ('callId' in anyPart && !('name' in anyPart)) {
+              this.outputChannel.appendLine(`[Part Debug]   Treating as tool result (duck-typed): callId=${anyPart.callId}`);
+              toolResults.push({
+                tool_call_id: anyPart.callId,
+                role: 'tool',
+                content: contentStr,
+              });
+              toolResultsTokens += await this.provideTokenCount(model, contentStr, token);
+            } else {
+              this.outputChannel.appendLine(`[Part Debug]   Treating as text from content property`);
+              contentParts.push({ type: 'text', text: contentStr });
+              messagesTokens += await this.provideTokenCount(model, contentStr, token);
+            }
+          }
         }
       }
 
@@ -1320,27 +1347,66 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
   /**
    * Process a message part using duck-typing
+   * IMPROVED: More strict checking to avoid misclassification
    */
   private processPartDuckTyped(
     part: unknown,
     toolResults: Record<string, unknown>[],
-    toolCalls: Record<string, unknown>[]
+    toolCalls: Record<string, unknown>[],
+    contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }>
   ): void {
     const anyPart = part as Record<string, unknown>;
+
+    // Log what we're trying to identify
+    const partKeys = Object.keys(anyPart).join(', ');
+    this.outputChannel.appendLine(`  [DuckType Debug] Unknown part type, keys: [${partKeys}]`);
+
+    // STRICT: Tool result must have callId AND content AND role should indicate it's a tool result
+    // Also check that content is a reasonable type (string or object)
     if ('callId' in anyPart && 'content' in anyPart && !('name' in anyPart)) {
-      this.outputChannel.appendLine(`  Found tool result (duck-typed): callId=${anyPart.callId}`);
-      toolResults.push({
-        tool_call_id: anyPart.callId,
-        role: 'tool',
-        content: typeof anyPart.content === 'string' ? anyPart.content : this.safeStringify(anyPart.content),
-      });
+      // Additional check: tool results should have content that looks like tool output
+      // If content looks like a regular message (starts with common text patterns), treat as text
+      const content = anyPart.content;
+      const contentStr = typeof content === 'string' ? content : this.safeStringify(content);
+
+      // Heuristic: If content is very long and doesn't look like tool output, might be text
+      // Tool results from view_image typically start with specific patterns
+      if (typeof content === 'string' &&
+          (content.startsWith('data:image/') ||
+           content.startsWith('{') ||
+           content.startsWith('[') ||
+           content.length < 10000)) {
+        this.outputChannel.appendLine(`  Found tool result (duck-typed): callId=${anyPart.callId}, contentLength=${contentStr.length}`);
+        toolResults.push({
+          tool_call_id: anyPart.callId,
+          role: 'tool',
+          content: contentStr,
+        });
+      } else {
+        // If it doesn't look like a tool result, log and treat as unknown
+        this.outputChannel.appendLine(`  [DuckType Warning] Part with callId looks like text, not tool result. Adding as text.`);
+        contentParts.push({ type: 'text', text: contentStr });
+      }
     } else if ('callId' in anyPart && 'name' in anyPart && 'input' in anyPart) {
+      // Tool call is more reliable to identify
       this.outputChannel.appendLine(`  Found tool call (duck-typed): callId=${anyPart.callId}, name=${anyPart.name}`);
       toolCalls.push({
         id: anyPart.callId,
         type: 'function',
         function: { name: anyPart.name, arguments: this.safeStringify(anyPart.input) },
       });
+    } else if ('value' in anyPart && typeof anyPart.value === 'string') {
+      // Likely a text part that failed instanceof check
+      this.outputChannel.appendLine(`  Found text part (duck-typed): length=${anyPart.value.length}`);
+      contentParts.push({ type: 'text', text: anyPart.value });
+    } else {
+      // Truly unknown - log for debugging
+      this.outputChannel.appendLine(`  [DuckType Unknown] Part could not be classified. Keys: [${partKeys}]`);
+      // Try to extract any string content as fallback
+      if ('content' in anyPart) {
+        const fallback = typeof anyPart.content === 'string' ? anyPart.content : this.safeStringify(anyPart.content);
+        contentParts.push({ type: 'text', text: fallback });
+      }
     }
   }
 
@@ -1376,7 +1442,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         this.outputChannel.appendLine(`  Found tool call: callId=${part.callId}, name=${part.name}`);
         toolCalls.push(this.convertToolCallPart(part));
       } else {
-        this.processPartDuckTyped(part, toolResults, toolCalls);
+        this.processPartDuckTyped(part, toolResults, toolCalls, contentParts);
       }
     }
 

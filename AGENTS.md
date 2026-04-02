@@ -7,7 +7,7 @@
 **GitHub Copilot LLM Gateway** 是一个 VS Code 扩展，允许用户将 GitHub Copilot 连接到自定义的开源 LLM 推理服务器（如 vLLM、Ollama、llama.cpp、LocalAI 等），实现通过 OpenAI 兼容 API 使用本地或私有部署的大语言模型。
 
 - **项目名称**: github-copilot-llm-gateway
-- **版本**: 1.0.0
+- **版本**: 1.1.5
 - **技术栈**: TypeScript, VS Code Extension API, esbuild
 - **许可证**: MIT
 - **仓库**: https://github.com/arbs-io/github-copilot-llm-gateway
@@ -66,7 +66,7 @@ npm run package
 - [x] **问题修复**: 思考等级本地化（使用英文原文作为l10n key）
 - [x] **问题修复**: config-priority模式优化（有配置时跳过API请求）
 - [ ] **问题排查**: 模型重复显示（VS Code/Copilot缓存问题）
-- [x] **计划 2**: 后台输出优化（日志级别、美化格式、工具信息简化）
+- [x] **计划 2**: 后台输出优化（日志级别、美化格式、工具信息简化）- 已完成
 - [ ] **计划 3**: Token 估算算法优化（precise/fast-estimate/none 模式）
 - [ ] **计划 4**: 切换模型时自动隐藏 Token 状态栏
 - [ ] **计划 5**: 模型上下文长度显示异常问题排查
@@ -334,6 +334,20 @@ npm run package
 - 代码中：`vscode.l10n.t('Thinking Effort')`（英文原文）
 - package.nls.json: `"Thinking Effort": "Thinking Effort"`
 - package.nls.zh-cn.json: `"Thinking Effort": "思考等级"`
+
+---
+
+### 发布历史
+
+#### v1.1.5 (2026-04-02)
+**计划 2 完成 - 后台输出优化**
+- 新增日志级别系统（error/warning/info/debug）
+- 新增 `enableMessageDebugLogs` 配置控制详细消息日志
+- 优化工具信息显示，默认只显示工具数量
+- 修复 view_image 工具导致 token 计算暴涨问题
+- 修复状态栏重复创建问题，改为全局管理
+- 修复配置修改时设置界面乱跳问题（离开时刷新）
+- 优化 Token 分类统计（Files、Tool Results）
 
 ---
 

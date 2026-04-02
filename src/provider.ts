@@ -419,7 +419,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       const toolCalls: Record<string, unknown>[] = [];
       const contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
 
-      // Debug: log message content types
+      // Debug: log message content types with MORE detail
       const contentTypes = msg.content.map((p: unknown) => {
         if (p instanceof vscode.LanguageModelTextPart) return 'text';
         if (p instanceof vscode.LanguageModelDataPart) return 'data';
@@ -427,13 +427,16 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         if (p instanceof vscode.LanguageModelToolCallPart) return 'tool_call';
         return 'unknown';
       });
-      this.outputChannel.appendLine(`  Message role=${role}, contentTypes=[${contentTypes.join(', ')}], contentCount=${msg.content.length}`);
+      this.outputChannel.appendLine(`[Message Debug] role=${role}, contentTypes=[${contentTypes.join(', ')}], contentCount=${msg.content.length}`);
 
-      for (const part of msg.content) {
-        // Debug: log part types to understand file handling
-        this.outputChannel.appendLine(`    Part type: ${part.constructor.name}, mimeType: ${(part as any).mimeType || 'N/A'}`);
+      for (let i = 0; i < msg.content.length; i++) {
+        const part = msg.content[i];
+        const partType = part.constructor.name;
+        this.outputChannel.appendLine(`[Part Debug] Index ${i}: type=${partType}`);
 
         if (part instanceof vscode.LanguageModelTextPart) {
+          const textPreview = part.value.substring(0, 100).replace(/\n/g, '\\n');
+          this.outputChannel.appendLine(`[Part Debug]   TextPart: length=${part.value.length}, preview="${textPreview}..."`);
           contentParts.push({ type: 'text', text: part.value });
           // Count as messages (this includes regular text and file references)
           messagesTokens += await this.provideTokenCount(model, part.value, token);
@@ -462,6 +465,12 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           toolResults.push(toolResult);
           // Count tool result content - detect if it's base64 image data
           const toolResultText = typeof toolResult.content === 'string' ? toolResult.content : this.safeStringify(toolResult.content);
+
+          // DEBUG: Log tool result size
+          const textLength = toolResultText.length;
+          const preview = toolResultText.substring(0, 200).replace(/\n/g, '\\n');
+          this.outputChannel.appendLine(`[Tool Result Debug] callId=${part.callId}, length=${textLength}, preview="${preview}..."`);
+
           // Check if content is base64 image data (from view_image tool)
           if (typeof toolResultText === 'string' && toolResultText.startsWith('data:image/')) {
             // Extract mime type and base64 data
@@ -473,11 +482,16 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
               const estimatedTokens = this.calculateImageTokens(new Uint8Array(byteLength), mimeType);
               toolResultsTokens += estimatedTokens;
               this.logService.debug('Token', `Tool result image: ${mimeType}, ~${estimatedTokens} tokens`);
+              this.outputChannel.appendLine(`[Tool Result Debug] Detected image data: ${mimeType}, base64 length=${base64Data.length}, estimated tokens=${estimatedTokens}`);
             } else {
-              toolResultsTokens += await this.provideTokenCount(model, toolResultText, token);
+              const tokens = await this.provideTokenCount(model, toolResultText, token);
+              toolResultsTokens += tokens;
+              this.outputChannel.appendLine(`[Tool Result Debug] Non-standard image format, counted as text: ${tokens} tokens`);
             }
           } else {
-            toolResultsTokens += await this.provideTokenCount(model, toolResultText, token);
+            const tokens = await this.provideTokenCount(model, toolResultText, token);
+            toolResultsTokens += tokens;
+            this.outputChannel.appendLine(`[Tool Result Debug] Counted as text: ${tokens} tokens`);
           }
         } else if (part instanceof vscode.LanguageModelToolCallPart) {
           toolCalls.push(this.convertToolCallPart(part));

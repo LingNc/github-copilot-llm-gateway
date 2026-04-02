@@ -213,7 +213,7 @@ export class ConfigManager {
     } else {
       const providerCount = Object.keys(providers).length;
       const modelCount = Object.values(providers).reduce(
-        (sum, p) => sum + Object.keys(p.models).length,
+        (sum, p) => sum + (p.models ? Object.keys(p.models).length : 0),
         0
       );
       this.outputChannel.appendLine(

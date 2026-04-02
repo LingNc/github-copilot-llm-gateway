@@ -7,6 +7,12 @@ export interface OpenAIModel {
   object: string;
   created: number;
   owned_by: string;
+  // Extended fields from some API providers (e.g., Moonshot)
+  display_name?: string;
+  context_length?: number;
+  supports_reasoning?: boolean;
+  supports_image_in?: boolean;
+  supports_video_in?: boolean;
 }
 
 export interface OpenAIModelsResponse {

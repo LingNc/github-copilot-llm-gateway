@@ -110,10 +110,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   private updateStatusBarVisibility(): void {
     if (!this.tokenStatusBarItem) return;
 
-    // Show status bar when there's an active chat session
-    const hasActiveSession = vscode.window.visibleTextEditors.length > 0 ||
-                             vscode.window.activeTerminal !== undefined;
-    if (hasActiveSession) {
+    // Show status bar when there's an active session (has token data)
+    if (this.currentContextTokens > 0) {
       this.tokenStatusBarItem.show();
     } else {
       this.tokenStatusBarItem.hide();

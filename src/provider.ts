@@ -905,7 +905,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       this.outputChannel.appendLine(`  Provider "${provider.id}": ${modelCount} model(s), baseURL=${provider.baseURL}`);
     }
 
-    for (const provider of providers) {
+    // Fetch models from all providers in parallel for better performance
+    const fetchPromises = providers.map(async (provider) => {
       try {
         const providerModels = await this.fetchModelsForProvider(
           provider.id,
@@ -917,11 +918,17 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         );
         // Log model IDs with their source for debugging duplicates
         this.outputChannel.appendLine(`  Provider "${provider.id}" returned models: [${providerModels.map(m => m.id).join(', ')}]`);
-        allModels.push(...providerModels);
+        return providerModels;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         this.outputChannel.appendLine(`Failed to fetch models from provider "${provider.id}": ${message}`);
+        return [];
       }
+    });
+
+    const results = await Promise.all(fetchPromises);
+    for (const providerModels of results) {
+      allModels.push(...providerModels);
     }
 
     this.outputChannel.appendLine(`Found ${allModels.length} model(s) from all providers`);
@@ -1118,22 +1125,29 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       const response = await client.fetchModels();
 
       for (const apiModel of response.data) {
-        // Add API-only models
-        this.outputChannel.appendLine(`    API model: ${apiModel.id}`);
-        // Use defaults for API-only models
-        const defaultMaxTokens = this.gatewayConfig.defaultMaxTokens;
-        const defaultMaxOutput = this.gatewayConfig.defaultMaxOutputTokens;
+        // Parse API model capabilities from extended fields
+        const hasVision = apiModel.supports_image_in === true;
+        const hasVideo = apiModel.supports_video_in === true;
+        const hasReasoning = apiModel.supports_reasoning === true;
+        // Use context_length from API if available, otherwise use default
+        const contextLength = apiModel.context_length || this.gatewayConfig.defaultMaxTokens;
+        // Use display_name from API if available
+        const displayName = apiModel.display_name || apiModel.id;
+
+        this.outputChannel.appendLine(
+          `    API model: ${apiModel.id} (vision=${hasVision}, reasoning=${hasReasoning}, context=${contextLength})`
+        );
 
         modelMap.set(apiModel.id, {
           id: apiModel.id,
-          name: formatName(apiModel.id),
+          name: formatName(displayName),
           family: providerId,
-          maxInputTokens: defaultMaxTokens,
-          maxOutputTokens: defaultMaxOutput,
+          maxInputTokens: contextLength,
+          maxOutputTokens: this.gatewayConfig.defaultMaxOutputTokens,
           version: '',
           capabilities: {
             toolCalling: this.gatewayConfig.enableToolCalling,
-            imageInput: false,
+            imageInput: hasVision,
           },
         });
       }

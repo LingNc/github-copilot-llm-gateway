@@ -78,16 +78,23 @@ export class GatewayClient {
 
   /**
    * Fetch available models from /v1/models endpoint
+   * Uses a short timeout (5s) to avoid blocking model list loading
    */
   public async fetchModels(): Promise<OpenAIModelsResponse> {
     const baseUrl = this.config.serverUrl.replace(/\/$/, '');
     const url = `${baseUrl}/models`;
 
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+
       const response = await this.fetch(url, {
         method: 'GET',
         headers: this.getHeaders(),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         throw new Error(`Failed to fetch models: ${response.status} ${response.statusText}`);
@@ -96,6 +103,9 @@ export class GatewayClient {
       return await response.json();
     } catch (error) {
       if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          throw new Error('Request timeout (5s) - server took too long to respond');
+        }
         throw new Error(`Failed to connect to inference server: ${error.message}`);
       }
       throw error;

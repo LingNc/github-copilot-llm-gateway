@@ -226,8 +226,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     const percentageText = `${percentage.toFixed(1)}%`;
     tooltip.appendMarkdown(`${tokenText}  **${percentageText}**\n\n`);
 
-    const filled = Math.round((percentage / 100) * 20);
-    const empty = 20 - filled;
+    // Progress bar - clamp percentage to 0-100 to avoid negative repeat count
+    const clampedPercentage = Math.min(100, Math.max(0, percentage));
+    const filled = Math.round((clampedPercentage / 100) * 20);
+    const empty = Math.max(0, 20 - filled);
     // Use VS Code theme blue color for the progress bar
     const barFilled = '█'.repeat(filled);
     const barEmpty = '▒'.repeat(empty);
@@ -1627,8 +1629,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     // Update token statistics display if enabled
     if (tokenStatisticsEnabled) {
-      // Calculate total tokens including tools overhead
-      const totalTokens = estimatedInputTokens + toolsOverhead;
+      // Calculate total tokens (estimatedInputTokens already includes tools overhead)
+      const totalTokens = estimatedInputTokens;
 
       // Calculate percentages based on categorized tokens
       const systemTokens = Math.floor(totalTokens * 0.13); // System Instructions ~13%

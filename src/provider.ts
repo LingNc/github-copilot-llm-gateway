@@ -1899,7 +1899,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     this.outputChannel.appendLine(`Token breakdown: messages=${messagesTokens}, files=${filesTokens}, toolResults=${toolResultsTokens}`);
 
     // Log message structure (only in debug mode)
-    if (debugLogsEnabled) {
+    if (this.debugLogsEnabled) {
       for (let i = 0; i < openAIMessages.length; i++) {
         const msg = openAIMessages[i];
         const toolCallId = typeof msg.tool_call_id === 'string' ? msg.tool_call_id : 'none';

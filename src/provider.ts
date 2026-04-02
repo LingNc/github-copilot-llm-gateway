@@ -496,8 +496,6 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
             const textPreview = part.value.substring(0, 100).replace(/\n/g, '\\n');
             this.outputChannel.appendLine(`[Part Debug] Index ${i}: type=${partType}`);
             this.outputChannel.appendLine(`[Part Debug]   TextPart: length=${part.value.length}, preview="${textPreview}..."`);
-          } else if (this.debugLogsEnabled) {
-            this.outputChannel.appendLine(`[Part Debug] Index ${i}: type=${partType}, length=${part.value.length}`);
           }
           contentParts.push({ type: 'text', text: part.value });
           // Count as messages (this includes regular text and file references)
@@ -508,20 +506,22 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
             const base64Data = Buffer.from(part.data).toString('base64');
             const imageUrl = `data:${part.mimeType};base64,${base64Data}`;
             contentParts.push({ type: 'image_url', image_url: { url: imageUrl } });
-            if (this.debugLogsEnabled) {
+            if (this.messageDebugLogsEnabled) {
+              this.outputChannel.appendLine(`[Part Debug] Index ${i}: type=${partType}`);
               this.outputChannel.appendLine(`[Part Debug]   Added image: ${part.mimeType}, ${part.data.length} bytes`);
             }
             // Calculate image tokens based on dimensions
             const estimatedImageTokens = this.calculateImageTokens(part.data, part.mimeType);
             filesTokens += estimatedImageTokens;
-            if (this.debugLogsEnabled) {
+            if (this.messageDebugLogsEnabled) {
               this.outputChannel.appendLine(`[Part Debug]   Estimated image tokens: ${estimatedImageTokens}`);
             }
           } else {
             // Handle other file types as text content
             const text = Buffer.from(part.data).toString('utf-8');
             contentParts.push({ type: 'text', text });
-            if (this.debugLogsEnabled) {
+            if (this.messageDebugLogsEnabled) {
+              this.outputChannel.appendLine(`[Part Debug] Index ${i}: type=${partType}`);
               this.outputChannel.appendLine(`[Part Debug]   Added file: ${part.mimeType}, ${part.data.length} bytes`);
             }
             // Count file content tokens
@@ -536,9 +536,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           const toolResultText = toolResult.content as string;
           const textLength = toolResultText.length;
 
-          // DEBUG: Log tool result size (only when debug enabled)
-          if (this.debugLogsEnabled) {
+          // DEBUG: Log tool result size (only when message debug enabled)
+          if (this.messageDebugLogsEnabled) {
             const preview = textLength > 200 ? toolResultText.substring(0, 200).replace(/\n/g, '\\n') : toolResultText.replace(/\n/g, '\\n');
+            this.outputChannel.appendLine(`[Part Debug] Index ${i}: type=${partType}`);
             this.outputChannel.appendLine(`[Tool Result Debug] callId=${part.callId}, length=${textLength}, preview="${preview}..."`);
           }
 
@@ -553,32 +554,34 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
               const estimatedTokens = this.calculateImageTokens(new Uint8Array(byteLength), mimeType);
               toolResultsTokens += estimatedTokens;
               this.logService.debug('Token', `Tool result image: ${mimeType}, ~${estimatedTokens} tokens`);
-              if (this.debugLogsEnabled) {
+              if (this.messageDebugLogsEnabled) {
                 this.outputChannel.appendLine(`[Tool Result Debug] Detected image data: ${mimeType}, base64 length=${base64Data.length}, estimated tokens=${estimatedTokens}`);
               }
             } else {
               const tokens = await this.provideTokenCount(model, toolResultText, token);
               toolResultsTokens += tokens;
-              if (this.debugLogsEnabled) {
+              if (this.messageDebugLogsEnabled) {
                 this.outputChannel.appendLine(`[Tool Result Debug] Non-standard image format, counted as text: ${tokens} tokens`);
               }
             }
           } else {
             const tokens = await this.provideTokenCount(model, toolResultText, token);
             toolResultsTokens += tokens;
-            if (this.debugLogsEnabled) {
+            if (this.messageDebugLogsEnabled) {
               this.outputChannel.appendLine(`[Tool Result Debug] Counted as text: ${tokens} tokens`);
             }
           }
         } else if (part instanceof vscode.LanguageModelToolCallPart) {
-          if (this.debugLogsEnabled) {
+          if (this.messageDebugLogsEnabled) {
+            this.outputChannel.appendLine(`[Part Debug] Index ${i}: type=${partType}`);
             this.outputChannel.appendLine(`[Part Debug]   ToolCall: ${part.name}, callId=${part.callId}`);
           }
           toolCalls.push(this.convertToolCallPart(part));
         } else {
           // Fallback for unknown part types that failed instanceof check
           const anyPart = part as Record<string, unknown>;
-          if (this.debugLogsEnabled) {
+          if (this.messageDebugLogsEnabled) {
+            this.outputChannel.appendLine(`[Part Debug] Index ${i}: type=${partType}`);
             this.outputChannel.appendLine(`[Part Debug] Unknown part type: ${part.constructor.name}, keys: [${Object.keys(anyPart).join(', ')}]`);
           }
 
@@ -1895,11 +1898,13 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     this.outputChannel.appendLine(`Converted to ${openAIMessages.length} OpenAI messages`);
     this.outputChannel.appendLine(`Token breakdown: messages=${messagesTokens}, files=${filesTokens}, toolResults=${toolResultsTokens}`);
 
-    // Log message structure
-    for (let i = 0; i < openAIMessages.length; i++) {
-      const msg = openAIMessages[i];
-      const toolCallId = typeof msg.tool_call_id === 'string' ? msg.tool_call_id : 'none';
-      this.outputChannel.appendLine(`  Message ${i + 1}: role=${msg.role}, hasContent=${!!msg.content}, hasToolCalls=${!!msg.tool_calls}, toolCallId=${toolCallId}`);
+    // Log message structure (only in debug mode)
+    if (debugLogsEnabled) {
+      for (let i = 0; i < openAIMessages.length; i++) {
+        const msg = openAIMessages[i];
+        const toolCallId = typeof msg.tool_call_id === 'string' ? msg.tool_call_id : 'none';
+        this.outputChannel.appendLine(`  Message ${i + 1}: role=${msg.role}, hasContent=${!!msg.content}, hasToolCalls=${!!msg.tool_calls}, toolCallId=${toolCallId}`);
+      }
     }
 
     // Calculate token limits (for display only, don't truncate - Copilot Chat manages context)

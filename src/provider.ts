@@ -102,7 +102,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       // This mimics Copilot Chat's behavior where clicking doesn't disrupt the UX
       this.tokenStatusBarItem.command = 'github.copilot.llm-gateway.statusBarNoOp';
       context.subscriptions.push(this.tokenStatusBarItem);
-      this.updateStatusBarVisibility();
+      // Initialize with default text and show
+      this.tokenStatusBarItem.text = '$(symbol-keyword) 0%';
+      this.tokenStatusBarItem.show();
     }
   }
 

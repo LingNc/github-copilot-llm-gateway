@@ -11,10 +11,9 @@ import {
 import { ConfigManager } from './config/ConfigManager';
 import { ResolvedModel, ConfigMode, ProviderNameStyle } from './config/types';
 import { TokenUsageViewProvider } from './views/TokenUsageView';
+import { LogService } from './services/LogService';
+import { getGlobalStatusBarItem } from './extension';
 
-/**
- * Union type for either client type
- */
 type ApiClient = GatewayClient | AnthropicClient;
 
 /**
@@ -27,6 +26,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   private gatewayConfig: GatewayConfig;
   private outputChannel: vscode.OutputChannel;
   private configManager: ConfigManager;
+  private logService: LogService;
   // Store tool schemas for the current request to fill missing required properties
   private readonly currentToolSchemas: Map<string, unknown> = new Map();
   // Track if we've shown the welcome notification this session
@@ -43,21 +43,25 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   // Cache debug logs setting to avoid repeated config lookups
   private debugLogsEnabled = false;
   private tokenDebugLogsEnabled = false;
-  // Status bar item for token usage display
-  private tokenStatusBarItem: vscode.StatusBarItem | undefined;
+  private messageDebugLogsEnabled = false;
+  // Status bar item for token display (use global to survive reloads)
+  private tokenStatusBarItem: vscode.StatusBarItem | undefined = getGlobalStatusBarItem();
   // Current session token statistics
   private currentContextTokens = 0;
   private currentModelMaxTokens = 0;
+  private currentTokenDetails?: Array<{ category: string; label: string; percentage: number }>;
   // Token usage view provider
   private tokenUsageProvider?: TokenUsageViewProvider;
 
   constructor(
     context: vscode.ExtensionContext,
     configManager: ConfigManager,
-    outputChannel: vscode.OutputChannel
+    outputChannel: vscode.OutputChannel,
+    logService: LogService
   ) {
     this.configManager = configManager;
     this.outputChannel = outputChannel;
+    this.logService = logService;
 
     // Load default config from first provider or global settings
     this.gatewayConfig = this.loadDefaultConfig();
@@ -65,16 +69,6 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     // Initialize status bar item
     this.initializeStatusBar(context);
-
-    // Watch for configuration changes
-    context.subscriptions.push(
-      vscode.workspace.onDidChangeConfiguration((e: vscode.ConfigurationChangeEvent) => {
-        if (e.affectsConfiguration('github.copilot.llm-gateway')) {
-          this.outputChannel.appendLine('Configuration changed, reloading...');
-          this.reloadConfig();
-        }
-      })
-    );
 
     // Initialize cached debug setting
     this.updateDebugSettings();
@@ -84,16 +78,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
    * Initialize status bar item for token display
    */
   private initializeStatusBar(context: vscode.ExtensionContext): void {
-    const config = vscode.workspace.getConfiguration('github.copilot.llm-gateway');
-    const tokenStatisticsEnabled = config.get<boolean>('enableTokenStatistics', true);
-
-    if (tokenStatisticsEnabled) {
-      this.tokenStatusBarItem = vscode.window.createStatusBarItem(
-        vscode.StatusBarAlignment.Right,
-        100
-      );
-      this.tokenStatusBarItem.command = undefined;
-      context.subscriptions.push(this.tokenStatusBarItem);
+    // Use global status bar if available
+    this.tokenStatusBarItem = getGlobalStatusBarItem();
+    if (this.tokenStatusBarItem) {
       this.updateStatusBarVisibility();
     }
   }
@@ -104,10 +91,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   private updateStatusBarVisibility(): void {
     if (!this.tokenStatusBarItem) return;
 
-    // Show status bar when there's an active chat session
-    const hasActiveSession = vscode.window.visibleTextEditors.length > 0 ||
-                             vscode.window.activeTerminal !== undefined;
-    if (hasActiveSession) {
+    // Show status bar when there's an active session (has token data)
+    if (this.currentContextTokens > 0) {
       this.tokenStatusBarItem.show();
     } else {
       this.tokenStatusBarItem.hide();
@@ -176,10 +161,19 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     this.currentModelMaxTokens = maxTokens;
 
     const percentage = Math.round((usedTokens / maxTokens) * 100);
-    // Status bar color: green (safe), yellow (warning), red (critical)
-    const color = percentage > 90 ? new vscode.ThemeColor('statusBarItem.errorForeground')
-      : percentage > 70 ? new vscode.ThemeColor('statusBarItem.warningForeground')
-      : '#6bcf7f'; // Green for safe usage
+    // Status bar color: green (<50%), yellow (50-80%), red (>80%)
+    // MODIFY HERE: Change these colors as needed
+    let color: string | vscode.ThemeColor | undefined;
+    if (percentage > 80) {
+      // HIGH USAGE: Red color - modify this hex color if needed
+      color = '#f44336';
+    } else if (percentage >= 50) {
+      // MEDIUM USAGE: Yellow/Orange color - modify this hex color if needed
+      color = '#ff9800';
+    } else {
+      // LOW USAGE: Green color - modify this hex color if needed
+      color = '#6bcf7f';
+    }
 
     this.tokenStatusBarItem.text = `$(symbol-keyword) ${percentage}%`;
     this.tokenStatusBarItem.color = color;
@@ -210,8 +204,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     const percentageText = `${percentage.toFixed(1)}%`;
     tooltip.appendMarkdown(`${tokenText}  **${percentageText}**\n\n`);
 
-    const filled = Math.round((percentage / 100) * 20);
-    const empty = 20 - filled;
+    // Progress bar - clamp percentage to 0-100 to avoid negative repeat count
+    const clampedPercentage = Math.min(100, Math.max(0, percentage));
+    const filled = Math.round((clampedPercentage / 100) * 20);
+    const empty = Math.max(0, 20 - filled);
     // Use VS Code theme blue color for the progress bar
     const barFilled = '█'.repeat(filled);
     const barEmpty = '▒'.repeat(empty);
@@ -268,7 +264,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       }));
     }
 
-    this.outputChannel.appendLine(`[Token Statistics] ${usedTokens}/${maxTokens} (${percentage}%)`);
+    this.logService.logTokens(usedTokens, maxTokens);
+    this.logService.debug('Token', `Details: ${details?.map(d => `${d.label}=${d.percentage}%`).join(', ') || 'none'}`);
   }
 
   /**
@@ -289,10 +286,32 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   }
 
   /**
+   * Show token usage information when clicking status bar
+   * Opens the Token Usage view panel
+   */
+  public async showTokenUsage(): Promise<void> {
+    if (this.currentContextTokens === 0) {
+      vscode.window.showInformationMessage('No active session');
+      return;
+    }
+
+    // Focus the token usage view
+    await vscode.commands.executeCommand('llmGateway.tokenUsage.focus');
+  }
+
+  /**
    * Set the token usage view provider
    */
   public setTokenUsageProvider(provider: TokenUsageViewProvider): void {
     this.tokenUsageProvider = provider;
+  }
+
+  /**
+   * Dispose provider resources
+   */
+  public dispose(): void {
+    // Don't dispose tokenStatusBarItem - it's global and survives reloads
+    this.tokenStatusBarItem = undefined;
   }
 
   /**
@@ -302,6 +321,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     const config = vscode.workspace.getConfiguration('github.copilot.llm-gateway');
     this.debugLogsEnabled = config.get<boolean>('enableDebugLogs', false);
     this.tokenDebugLogsEnabled = config.get<boolean>('enableTokenDebugLogs', false);
+    this.messageDebugLogsEnabled = config.get<boolean>('enableMessageDebugLogs', false);
   }
 
   /**
@@ -335,12 +355,39 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
   /**
    * Convert a tool result part to OpenAI format
+   * IMPROVED: Handle content as array (like Copilot does)
    */
   private convertToolResultPart(part: vscode.LanguageModelToolResultPart): Record<string, unknown> {
+    // Content can be a single value or an array of parts (LanguageModelTextPart, LanguageModelDataPart, etc.)
+    let contentStr: string;
+
+    if (Array.isArray(part.content)) {
+      // Content is an array of parts - extract text from each
+      const parts: string[] = [];
+      for (const item of part.content) {
+        if (item instanceof vscode.LanguageModelTextPart) {
+          parts.push(item.value);
+        } else if (item instanceof vscode.LanguageModelDataPart) {
+          // Binary data - just note it was present
+          parts.push(`[Data: ${item.mimeType}, ${item.data.length} bytes]`);
+        } else if (typeof item === 'string') {
+          parts.push(item);
+        } else {
+          // Unknown part type - stringify
+          parts.push(this.safeStringify(item));
+        }
+      }
+      contentStr = parts.join('');
+    } else if (typeof part.content === 'string') {
+      contentStr = part.content;
+    } else {
+      contentStr = this.safeStringify(part.content);
+    }
+
     return {
       tool_call_id: part.callId,
       role: 'tool',
-      content: typeof part.content === 'string' ? part.content : this.safeStringify(part.content),
+      content: contentStr,
     };
   }
 
@@ -356,6 +403,32 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         arguments: this.safeStringify(part.input),
       },
     };
+  }
+
+  /**
+   * Extract content from a tool result part for token counting
+   * Handles both string content and array of parts (like Copilot does)
+   */
+  private extractToolResultContent(part: vscode.LanguageModelToolResultPart): string {
+    if (Array.isArray(part.content)) {
+      const parts: string[] = [];
+      for (const item of part.content) {
+        if (item instanceof vscode.LanguageModelTextPart) {
+          parts.push(item.value);
+        } else if (item instanceof vscode.LanguageModelDataPart) {
+          parts.push(`[Data: ${item.mimeType}, ${item.data.length} bytes]`);
+        } else if (typeof item === 'string') {
+          parts.push(item);
+        } else {
+          parts.push(this.safeStringify(item));
+        }
+      }
+      return parts.join('');
+    } else if (typeof part.content === 'string') {
+      return part.content;
+    } else {
+      return this.safeStringify(part.content);
+    }
   }
 
   /**
@@ -386,44 +459,175 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       const toolCalls: Record<string, unknown>[] = [];
       const contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
 
-      // Debug: log message content types
-      const contentTypes = msg.content.map((p: unknown) => {
-        if (p instanceof vscode.LanguageModelTextPart) return 'text';
-        if (p instanceof vscode.LanguageModelDataPart) return 'data';
-        if (p instanceof vscode.LanguageModelToolResultPart) return 'tool_result';
-        if (p instanceof vscode.LanguageModelToolCallPart) return 'tool_call';
-        return 'unknown';
-      });
-      this.outputChannel.appendLine(`  Message role=${role}, contentTypes=[${contentTypes.join(', ')}], contentCount=${msg.content.length}`);
+      // Debug: log message content types (only when debug enabled)
+      if (this.debugLogsEnabled) {
+        const contentTypes = msg.content.map((p: unknown) => {
+          if (p instanceof vscode.LanguageModelTextPart) return 'text';
+          if (p instanceof vscode.LanguageModelDataPart) return 'data';
+          if (p instanceof vscode.LanguageModelToolResultPart) return 'tool_result';
+          if (p instanceof vscode.LanguageModelToolCallPart) return 'tool_call';
+          return 'unknown';
+        });
+        this.outputChannel.appendLine(`[Message Debug] role=${role}, contentTypes=[${contentTypes.join(', ')}], contentCount=${msg.content.length}`);
+      }
 
-      for (const part of msg.content) {
+      for (let i = 0; i < msg.content.length; i++) {
+        const part = msg.content[i];
+        const partType = part.constructor.name;
+
         if (part instanceof vscode.LanguageModelTextPart) {
+          // Only show detailed preview when message debug is enabled
+          if (this.messageDebugLogsEnabled) {
+            const textPreview = part.value.substring(0, 100).replace(/\n/g, '\\n');
+            this.outputChannel.appendLine(`[Part Debug] Index ${i}: type=${partType}`);
+            this.outputChannel.appendLine(`[Part Debug]   TextPart: length=${part.value.length}, preview="${textPreview}..."`);
+          }
           contentParts.push({ type: 'text', text: part.value });
           // Count as messages (this includes regular text and file references)
           messagesTokens += await this.provideTokenCount(model, part.value, token);
         } else if (part instanceof vscode.LanguageModelDataPart) {
-          // Handle image data - count as files
+          // Handle file data (images and other binary data)
           if (part.mimeType.startsWith('image/')) {
             const base64Data = Buffer.from(part.data).toString('base64');
             const imageUrl = `data:${part.mimeType};base64,${base64Data}`;
             contentParts.push({ type: 'image_url', image_url: { url: imageUrl } });
-            this.outputChannel.appendLine(`  Added image: ${part.mimeType}, ${part.data.length} bytes`);
-            // Count image data as files
-            filesTokens += await this.provideTokenCount(model, base64Data, token);
+            if (this.messageDebugLogsEnabled) {
+              this.outputChannel.appendLine(`[Part Debug] Index ${i}: type=${partType}`);
+              this.outputChannel.appendLine(`[Part Debug]   Added image: ${part.mimeType}, ${part.data.length} bytes`);
+            }
+            // Calculate image tokens based on dimensions
+            const estimatedImageTokens = this.calculateImageTokens(part.data, part.mimeType);
+            filesTokens += estimatedImageTokens;
+            if (this.messageDebugLogsEnabled) {
+              this.outputChannel.appendLine(`[Part Debug]   Estimated image tokens: ${estimatedImageTokens}`);
+            }
           } else {
-            // Handle other binary data as text
+            // Handle other file types as text content
             const text = Buffer.from(part.data).toString('utf-8');
             contentParts.push({ type: 'text', text });
-            messagesTokens += await this.provideTokenCount(model, text, token);
+            if (this.messageDebugLogsEnabled) {
+              this.outputChannel.appendLine(`[Part Debug] Index ${i}: type=${partType}`);
+              this.outputChannel.appendLine(`[Part Debug]   Added file: ${part.mimeType}, ${part.data.length} bytes`);
+            }
+            // Count file content tokens
+            const fileTokens = await this.provideTokenCount(model, text, token);
+            filesTokens += fileTokens;
           }
         } else if (part instanceof vscode.LanguageModelToolResultPart) {
           const toolResult = this.convertToolResultPart(part);
           toolResults.push(toolResult);
-          // Count tool result content
-          const toolResultText = typeof toolResult.content === 'string' ? toolResult.content : this.safeStringify(toolResult.content);
-          toolResultsTokens += await this.provideTokenCount(model, toolResultText, token);
+
+          // IMPROVED: Calculate tokens from the actual tool result content (handles arrays correctly)
+          const toolResultText = toolResult.content as string;
+          const textLength = toolResultText.length;
+
+          // DEBUG: Log tool result size (only when message debug enabled)
+          if (this.messageDebugLogsEnabled) {
+            const preview = textLength > 200 ? toolResultText.substring(0, 200).replace(/\n/g, '\\n') : toolResultText.replace(/\n/g, '\\n');
+            this.outputChannel.appendLine(`[Part Debug] Index ${i}: type=${partType}`);
+            this.outputChannel.appendLine(`[Tool Result Debug] callId=${part.callId}, length=${textLength}, preview="${preview}..."`);
+          }
+
+          // Check if content is base64 image data (from view_image tool)
+          if (toolResultText.startsWith('data:image/')) {
+            // Extract mime type and base64 data
+            const match = toolResultText.match(/^data:image\/([^;]+);base64,(.+)$/);
+            if (match) {
+              const mimeType = `image/${match[1]}`;
+              const base64Data = match[2];
+              const byteLength = Math.ceil(base64Data.length * 0.75); // Approximate byte length
+              const estimatedTokens = this.calculateImageTokens(new Uint8Array(byteLength), mimeType);
+              toolResultsTokens += estimatedTokens;
+              this.logService.debug('Token', `Tool result image: ${mimeType}, ~${estimatedTokens} tokens`);
+              if (this.messageDebugLogsEnabled) {
+                this.outputChannel.appendLine(`[Tool Result Debug] Detected image data: ${mimeType}, base64 length=${base64Data.length}, estimated tokens=${estimatedTokens}`);
+              }
+            } else {
+              const tokens = await this.provideTokenCount(model, toolResultText, token);
+              toolResultsTokens += tokens;
+              if (this.messageDebugLogsEnabled) {
+                this.outputChannel.appendLine(`[Tool Result Debug] Non-standard image format, counted as text: ${tokens} tokens`);
+              }
+            }
+          } else {
+            const tokens = await this.provideTokenCount(model, toolResultText, token);
+            toolResultsTokens += tokens;
+            if (this.messageDebugLogsEnabled) {
+              this.outputChannel.appendLine(`[Tool Result Debug] Counted as text: ${tokens} tokens`);
+            }
+          }
         } else if (part instanceof vscode.LanguageModelToolCallPart) {
+          if (this.messageDebugLogsEnabled) {
+            this.outputChannel.appendLine(`[Part Debug] Index ${i}: type=${partType}`);
+            this.outputChannel.appendLine(`[Part Debug]   ToolCall: ${part.name}, callId=${part.callId}`);
+          }
           toolCalls.push(this.convertToolCallPart(part));
+        } else {
+          // Fallback for unknown part types that failed instanceof check
+          const anyPart = part as Record<string, unknown>;
+          if (this.messageDebugLogsEnabled) {
+            this.outputChannel.appendLine(`[Part Debug] Index ${i}: type=${partType}`);
+            this.outputChannel.appendLine(`[Part Debug] Unknown part type: ${part.constructor.name}, keys: [${Object.keys(anyPart).join(', ')}]`);
+          }
+
+          // Try to extract text content if it has a 'value' property (likely TextPart)
+          if ('value' in anyPart && typeof anyPart.value === 'string') {
+            if (this.debugLogsEnabled) {
+              this.outputChannel.appendLine(`[Part Debug]   Treating as text (has value property): length=${anyPart.value.length}`);
+            }
+            contentParts.push({ type: 'text', text: anyPart.value });
+            messagesTokens += await this.provideTokenCount(model, anyPart.value, token);
+          } else if ('content' in anyPart) {
+            // Might be a tool result that failed instanceof
+            // IMPROVED: Handle array content like convertToolResultPart does
+            let contentStr: string;
+            const content = anyPart.content;
+
+            if (Array.isArray(content)) {
+              // Content is array of parts - extract text and handle images
+              const parts: string[] = [];
+              for (const item of content) {
+                if (item instanceof vscode.LanguageModelTextPart ||
+                    (typeof item === 'object' && 'value' in item && typeof item.value === 'string')) {
+                  // TextPart or duck-typed text part
+                  parts.push(item.value || String(item));
+                } else if (item instanceof vscode.LanguageModelDataPart ||
+                           (typeof item === 'object' && 'mimeType' in item && 'data' in item)) {
+                  // DataPart or duck-typed data part (likely image)
+                  const mimeType = item.mimeType || 'application/octet-stream';
+                  const dataLength = item.data?.length || 0;
+                  parts.push(`[Data: ${mimeType}, ${dataLength} bytes]`);
+                } else if (typeof item === 'string') {
+                  parts.push(item);
+                } else {
+                  parts.push(this.safeStringify(item));
+                }
+              }
+              contentStr = parts.join('');
+            } else if (typeof content === 'string') {
+              contentStr = content;
+            } else {
+              contentStr = this.safeStringify(content);
+            }
+
+            if ('callId' in anyPart && !('name' in anyPart)) {
+              if (this.debugLogsEnabled) {
+                this.outputChannel.appendLine(`[Part Debug]   Treating as tool result (duck-typed): callId=${anyPart.callId}, contentLength=${contentStr.length}`);
+              }
+              toolResults.push({
+                tool_call_id: anyPart.callId,
+                role: 'tool',
+                content: contentStr,
+              });
+              toolResultsTokens += await this.provideTokenCount(model, contentStr, token);
+            } else {
+              if (this.debugLogsEnabled) {
+                this.outputChannel.appendLine(`[Part Debug]   Treating as text from content property`);
+              }
+              contentParts.push({ type: 'text', text: contentStr });
+              messagesTokens += await this.provideTokenCount(model, contentStr, token);
+            }
+          }
         }
       }
 
@@ -518,7 +722,11 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       }
 
       requestOptions.parallel_tool_calls = this.gatewayConfig.parallelToolCalling;
-      this.outputChannel.appendLine(`Sending ${requestOptions.tools.length} tools to model (parallel: ${this.gatewayConfig.parallelToolCalling})`);
+      this.logService.logTools(
+        'Tool',
+        options.tools.map(t => ({ name: t.name, description: t.description })),
+        this.gatewayConfig.parallelToolCalling
+      );
     }
   }
 
@@ -767,7 +975,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     client: ApiClient,
     isAnthropic: boolean
   ): Promise<void> {
-    this.outputChannel.appendLine(`Streaming chat completion...`);
+    this.logService.info('Request', 'Streaming chat completion...');
     let totalContent = '';
     let totalToolCalls = 0;
 
@@ -845,7 +1053,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       }
     }
 
-    this.outputChannel.appendLine(`Completed chat request, received ${totalContent.length} characters, ${totalToolCalls} tool calls`);
+    this.logService.info('Response', `Completed: ${totalContent.length} chars, ${totalToolCalls} tool calls`);
   }
 
   /**
@@ -860,18 +1068,19 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     const showProviderPrefix = this.configManager.shouldShowProviderPrefix();
     const providerNameStyle = this.configManager.getProviderNameStyle();
 
-    this.outputChannel.appendLine(`Fetching models from all providers (mode: ${configMode}, style: ${providerNameStyle})...`);
+    this.logService.info('Config', `Fetching models (mode: ${configMode}, style: ${providerNameStyle})...`);
 
     const allModels: vscode.LanguageModelChatInformation[] = [];
     const providers = this.configManager.getProviders();
 
-    this.outputChannel.appendLine(`Found ${providers.length} provider(s) in config`);
+    this.logService.info('Config', `Found ${providers.length} provider(s) in config`);
     for (const provider of providers) {
       const modelCount = Object.keys(provider.models || {}).length;
-      this.outputChannel.appendLine(`  Provider "${provider.id}": ${modelCount} model(s), baseURL=${provider.baseURL}`);
+      this.logService.debug('Config', `  Provider "${provider.id}": ${modelCount} model(s), baseURL=${provider.baseURL}`);
     }
 
-    for (const provider of providers) {
+    // Fetch models from all providers in parallel for better performance
+    const fetchPromises = providers.map(async (provider) => {
       try {
         const providerModels = await this.fetchModelsForProvider(
           provider.id,
@@ -881,14 +1090,33 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           options,
           token
         );
-        allModels.push(...providerModels);
+        // Log model IDs with their source for debugging duplicates
+        this.logService.debug('Config', `  Provider "${provider.id}" returned: [${providerModels.map(m => m.id).join(', ')}]`);
+        return providerModels;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        this.outputChannel.appendLine(`Failed to fetch models from provider "${provider.id}": ${message}`);
+        this.logService.warning('Config', `Failed to fetch from "${provider.id}": ${message}`);
+        return [];
       }
+    });
+
+    const results = await Promise.all(fetchPromises);
+    for (const providerModels of results) {
+      allModels.push(...providerModels);
     }
 
-    this.outputChannel.appendLine(`Found ${allModels.length} model(s) from all providers`);
+    this.logService.info('Config', `Found ${allModels.length} model(s) from all providers`);
+
+    // Check for duplicate model IDs
+    const idCounts = new Map<string, number>();
+    for (const model of allModels) {
+      idCounts.set(model.id, (idCounts.get(model.id) || 0) + 1);
+    }
+    const duplicates = Array.from(idCounts.entries()).filter(([_, count]) => count > 1);
+    if (duplicates.length > 0) {
+      this.outputChannel.appendLine(`WARNING: Found duplicate model IDs: ${duplicates.map(([id, count]) => `${id}(${count})`).join(', ')}`);
+    }
+
     return allModels;
   }
 
@@ -925,6 +1153,70 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   }
 
   /**
+   * Build configuration schema for model picker (e.g., thinking effort selector)
+   * Reference: Copilot Chat's buildConfigurationSchema implementation
+   *
+   * Logic:
+   * - If thinking.type !== 'enabled': no thinking configuration shown
+   * - If thinking.levels is defined: show dropdown with specified levels
+   * - If thinking.type === 'enabled' but no levels: enable thinking without dropdown
+   */
+  private buildConfigurationSchema(
+    model: ResolvedModel
+  ): vscode.LanguageModelConfigurationSchema | undefined {
+    const thinking = model.options?.thinking;
+
+    // If thinking is not enabled, return undefined
+    if (!thinking || thinking.type !== 'enabled') {
+      return undefined;
+    }
+
+    // If levels is specified, show dropdown in model picker
+    if (thinking.levels && thinking.levels.length > 0) {
+      const effortLevels = thinking.levels;
+      const defaultEffort = thinking.effort && effortLevels.includes(thinking.effort)
+        ? thinking.effort
+        : effortLevels[0];
+
+      // Get VS Code language
+      const vscodeLang = vscode.env.language;
+      const isZh = vscodeLang.startsWith('zh');
+
+      // Filter descriptions based on available levels and language
+      const levelDescriptions: Record<string, string> = {
+        low: isZh ? '响应更快，推理较少' : 'Faster responses with less reasoning',
+        medium: isZh ? '平衡推理与速度' : 'Balanced reasoning and speed',
+        high: isZh ? '最大推理深度' : 'Maximum reasoning depth',
+      };
+
+      // Map effort levels to localized labels and descriptions
+      const levelLabels: Record<string, string> = {
+        low: 'Low',
+        medium: 'Medium',
+        high: 'High',
+      };
+
+      return {
+        properties: {
+          reasoningEffort: {
+            type: 'string',
+            title: isZh ? '思考等级' : 'Thinking Effort',
+            enum: effortLevels,
+            enumItemLabels: effortLevels.map(level => levelLabels[level] || level.charAt(0).toUpperCase() + level.slice(1)),
+            enumDescriptions: effortLevels.map(level => levelDescriptions[level] || level),
+            default: defaultEffort,
+            group: 'navigation',
+          }
+        }
+      };
+    }
+
+    // If no levels specified but thinking is enabled, no dropdown is shown
+    // The model will use default thinking behavior
+    return undefined;
+  }
+
+  /**
    * Build model info from configuration only
    */
   private buildModelInfoFromConfig(
@@ -939,6 +1231,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       const formattedName = showProviderPrefix
         ? (providerNameStyle === 'slash' ? `${providerId}/${model.name}` : `[${providerId}] ${model.name}`)
         : model.name;
+
+      // Build configuration schema if model supports thinking effort
+      const configurationSchema = this.buildConfigurationSchema(model);
+
       return {
         id: model.id,
         name: formattedName,
@@ -950,6 +1246,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           toolCalling: model.capabilities?.toolCalling ?? true,
           imageInput: model.capabilities?.vision ?? false,
         },
+        configurationSchema,
       };
     });
   }
@@ -975,6 +1272,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     };
 
     for (const model of configuredModels) {
+      // Build configuration schema if model supports thinking effort
+      const configurationSchema = this.buildConfigurationSchema(model);
+
       modelMap.set(model.id, {
         id: model.id,
         name: formatName(model.name),
@@ -986,34 +1286,48 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           toolCalling: model.capabilities?.toolCalling ?? true,
           imageInput: model.capabilities?.vision ?? false,
         },
+        configurationSchema,
       });
     }
 
-    // Then try to fetch from API and merge
+    // If there are configured models, use them directly without API call
+    if (configuredModels.length > 0) {
+      this.outputChannel.appendLine(`  Provider "${providerId}": using ${configuredModels.length} configured model(s), skipping API fetch`);
+      return Array.from(modelMap.values());
+    }
+
+    // Only fetch from API if no models are configured
+    this.outputChannel.appendLine(`  Provider "${providerId}": no configured models, fetching from API...`);
     try {
       const client = this.getClient(providerId);
       const response = await client.fetchModels();
 
       for (const apiModel of response.data) {
-        // If model already in config, keep config values (config priority)
-        if (!modelMap.has(apiModel.id)) {
-          // Use defaults for API-only models
-          const defaultMaxTokens = this.gatewayConfig.defaultMaxTokens;
-          const defaultMaxOutput = this.gatewayConfig.defaultMaxOutputTokens;
+        // Parse API model capabilities from extended fields
+        const hasVision = apiModel.supports_image_in === true;
+        const hasVideo = apiModel.supports_video_in === true;
+        const hasReasoning = apiModel.supports_reasoning === true;
+        // Use context_length from API if available, otherwise use default
+        const contextLength = apiModel.context_length || this.gatewayConfig.defaultMaxTokens;
+        // Use display_name from API if available
+        const displayName = apiModel.display_name || apiModel.id;
 
-          modelMap.set(apiModel.id, {
-            id: apiModel.id,
-            name: formatName(apiModel.id),
-            family: providerId,
-            maxInputTokens: defaultMaxTokens,
-            maxOutputTokens: defaultMaxOutput,
-            version: '',
-            capabilities: {
-              toolCalling: this.gatewayConfig.enableToolCalling,
-              imageInput: false,
-            },
-          });
-        }
+        this.outputChannel.appendLine(
+          `    API model: ${apiModel.id} (vision=${hasVision}, reasoning=${hasReasoning}, context=${contextLength})`
+        );
+
+        modelMap.set(apiModel.id, {
+          id: apiModel.id,
+          name: formatName(displayName),
+          family: providerId,
+          maxInputTokens: contextLength,
+          maxOutputTokens: this.gatewayConfig.defaultMaxOutputTokens,
+          version: '',
+          capabilities: {
+            toolCalling: this.gatewayConfig.enableToolCalling,
+            imageInput: hasVision,
+          },
+        });
       }
 
       this.outputChannel.appendLine(`Merged ${modelMap.size} models (config + API)`);
@@ -1101,6 +1415,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       for (const apiModel of response.data) {
         const configuredModel = modelMap.get(apiModel.id);
 
+        // Build configuration schema if configured model supports thinking
+        const configurationSchema = configuredModel ? this.buildConfigurationSchema(configuredModel) : undefined;
+
         // API priority: use API model id, but config values if available
         result.push({
           id: apiModel.id,
@@ -1113,6 +1430,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
             toolCalling: configuredModel?.capabilities?.toolCalling ?? this.gatewayConfig.enableToolCalling,
             imageInput: configuredModel?.capabilities?.vision ?? false,
           },
+          configurationSchema,
         });
       }
 
@@ -1135,27 +1453,142 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
   /**
    * Process a message part using duck-typing
+   * IMPROVED: More strict checking to avoid misclassification
    */
   private processPartDuckTyped(
     part: unknown,
     toolResults: Record<string, unknown>[],
-    toolCalls: Record<string, unknown>[]
+    toolCalls: Record<string, unknown>[],
+    contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }>
   ): void {
     const anyPart = part as Record<string, unknown>;
+
+    // Log what we're trying to identify
+    const partKeys = Object.keys(anyPart).join(', ');
+    this.outputChannel.appendLine(`  [DuckType Debug] Unknown part type, keys: [${partKeys}]`);
+
+    // STRICT: Tool result must have callId AND content AND role should indicate it's a tool result
+    // Also check that content is a reasonable type (string or object)
     if ('callId' in anyPart && 'content' in anyPart && !('name' in anyPart)) {
-      this.outputChannel.appendLine(`  Found tool result (duck-typed): callId=${anyPart.callId}`);
-      toolResults.push({
-        tool_call_id: anyPart.callId,
-        role: 'tool',
-        content: typeof anyPart.content === 'string' ? anyPart.content : this.safeStringify(anyPart.content),
-      });
+      // Additional check: tool results should have content that looks like tool output
+      // If content looks like a regular message (starts with common text patterns), treat as text
+      const content = anyPart.content;
+
+      // IMPROVED: Handle array content properly (like Copilot does)
+      let contentStr: string;
+      if (Array.isArray(content)) {
+        // Content is array of parts - extract text and handle images/data properly
+        const parts: string[] = [];
+        for (const item of content) {
+          if (typeof item === 'string') {
+            parts.push(item);
+          } else if (item && typeof item === 'object') {
+            if ('value' in item && typeof item.value === 'string') {
+              // TextPart
+              parts.push(item.value);
+            } else if ('mimeType' in item && 'data' in item) {
+              // DataPart (image or binary data) - don't include full data, just metadata
+              const mimeType = String(item.mimeType || 'application/octet-stream');
+              const dataLength = item.data?.length || 0;
+              parts.push(`[Data: ${mimeType}, ${dataLength} bytes]`);
+            } else {
+              // Other object types
+              parts.push(this.safeStringify(item));
+            }
+          } else {
+            parts.push(String(item));
+          }
+        }
+        contentStr = parts.join('');
+      } else if (typeof content === 'string') {
+        contentStr = content;
+      } else {
+        contentStr = this.safeStringify(content);
+      }
+
+      // Heuristic: If content is very long and doesn't look like tool output, might be text
+      // Tool results from view_image typically start with specific patterns
+      if (typeof content === 'string' &&
+          (content.startsWith('data:image/') ||
+           content.startsWith('{') ||
+           content.startsWith('[') ||
+           content.length < 10000)) {
+        if (this.debugLogsEnabled) {
+          this.outputChannel.appendLine(`  Found tool result (duck-typed): callId=${anyPart.callId}, contentLength=${contentStr.length}`);
+        }
+        toolResults.push({
+          tool_call_id: anyPart.callId,
+          role: 'tool',
+          content: contentStr,
+        });
+      } else if (Array.isArray(content)) {
+        // Array content - likely tool result with mixed text/data
+        if (this.debugLogsEnabled) {
+          this.outputChannel.appendLine(`  Found tool result (duck-typed, array): callId=${anyPart.callId}, contentLength=${contentStr.length}`);
+        }
+        toolResults.push({
+          tool_call_id: anyPart.callId,
+          role: 'tool',
+          content: contentStr,
+        });
+      } else {
+        // If it doesn't look like a tool result, log and treat as unknown
+        if (this.debugLogsEnabled) {
+          this.outputChannel.appendLine(`  [DuckType Warning] Part with callId looks like text, not tool result. Adding as text.`);
+        }
+        contentParts.push({ type: 'text', text: contentStr });
+      }
     } else if ('callId' in anyPart && 'name' in anyPart && 'input' in anyPart) {
-      this.outputChannel.appendLine(`  Found tool call (duck-typed): callId=${anyPart.callId}, name=${anyPart.name}`);
+      // Tool call is more reliable to identify
+      if (this.debugLogsEnabled) {
+        this.outputChannel.appendLine(`  Found tool call (duck-typed): callId=${anyPart.callId}, name=${anyPart.name}`);
+      }
       toolCalls.push({
         id: anyPart.callId,
         type: 'function',
         function: { name: anyPart.name, arguments: this.safeStringify(anyPart.input) },
       });
+    } else if ('value' in anyPart && typeof anyPart.value === 'string') {
+      // Likely a text part that failed instanceof check
+      if (this.debugLogsEnabled) {
+        this.outputChannel.appendLine(`  Found text part (duck-typed): length=${anyPart.value.length}`);
+      }
+      contentParts.push({ type: 'text', text: anyPart.value });
+    } else {
+      // Truly unknown - log for debugging
+      if (this.debugLogsEnabled) {
+        this.outputChannel.appendLine(`  [DuckType Unknown] Part could not be classified. Keys: [${partKeys}]`);
+      }
+      // Try to extract any string content as fallback
+      if ('content' in anyPart) {
+        const content = anyPart.content;
+        let fallback: string;
+        if (Array.isArray(content)) {
+          // Handle array - extract text parts, summarize data parts
+          const parts: string[] = [];
+          for (const item of content) {
+            if (typeof item === 'string') {
+              parts.push(item);
+            } else if (item && typeof item === 'object') {
+              if ('value' in item && typeof item.value === 'string') {
+                parts.push(item.value);
+              } else if ('mimeType' in item && 'data' in item) {
+                parts.push(`[Data: ${item.mimeType}, ${item.data?.length || 0} bytes]`);
+              } else {
+                parts.push(this.safeStringify(item));
+              }
+            } else {
+              parts.push(String(item));
+            }
+          }
+          fallback = parts.join('');
+        } else if (typeof content === 'string') {
+          fallback = content;
+        } else {
+          fallback = this.safeStringify(content);
+        }
+        contentParts.push({ type: 'text', text: fallback });
+      }
     }
   }
 
@@ -1170,7 +1603,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     for (const part of msg.content) {
       if (part instanceof vscode.LanguageModelTextPart) {
-        this.outputChannel.appendLine(`  Found text part: ${part.value.substring(0, 100)}${part.value.length > 100 ? '...' : ''}`);
+        if (this.debugLogsEnabled) {
+          this.outputChannel.appendLine(`  Found text part: ${part.value.substring(0, 100)}${part.value.length > 100 ? '...' : ''}`);
+        }
         contentParts.push({ type: 'text', text: part.value });
       } else if (part instanceof vscode.LanguageModelDataPart) {
         // Handle image data
@@ -1178,20 +1613,28 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           const base64Data = Buffer.from(part.data).toString('base64');
           const imageUrl = `data:${part.mimeType};base64,${base64Data}`;
           contentParts.push({ type: 'image_url', image_url: { url: imageUrl } });
-          this.outputChannel.appendLine(`  Found image: ${part.mimeType}, ${part.data.length} bytes`);
+          if (this.debugLogsEnabled) {
+            this.outputChannel.appendLine(`  Found image: ${part.mimeType}, ${part.data.length} bytes`);
+          }
         } else {
           const text = Buffer.from(part.data).toString('utf-8');
           contentParts.push({ type: 'text', text });
-          this.outputChannel.appendLine(`  Found data part: ${part.mimeType}, ${part.data.length} bytes`);
+          if (this.debugLogsEnabled) {
+            this.outputChannel.appendLine(`  Found data part: ${part.mimeType}, ${part.data.length} bytes`);
+          }
         }
       } else if (part instanceof vscode.LanguageModelToolResultPart) {
-        this.outputChannel.appendLine(`  Found tool result: callId=${part.callId}`);
+        if (this.debugLogsEnabled) {
+          this.outputChannel.appendLine(`  Found tool result: callId=${part.callId}`);
+        }
         toolResults.push(this.convertToolResultPart(part));
       } else if (part instanceof vscode.LanguageModelToolCallPart) {
-        this.outputChannel.appendLine(`  Found tool call: callId=${part.callId}, name=${part.name}`);
+        if (this.debugLogsEnabled) {
+          this.outputChannel.appendLine(`  Found tool call: callId=${part.callId}, name=${part.name}`);
+        }
         toolCalls.push(this.convertToolCallPart(part));
       } else {
-        this.processPartDuckTyped(part, toolResults, toolCalls);
+        this.processPartDuckTyped(part, toolResults, toolCalls, contentParts);
       }
     }
 
@@ -1218,6 +1661,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
   /**
    * Calculate safe max output tokens
+   * Ensures minimum output capacity even under high input load
    */
   private calculateSafeMaxOutputTokens(estimatedInputTokens: number, toolsOverhead: number, modelId: string): number {
     const modelAndProvider = this.findModelAndProvider(modelId);
@@ -1225,15 +1669,36 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     const modelMaxContext = resolvedModel?.limit.context ?? this.gatewayConfig.defaultMaxTokens;
     const defaultMaxOutput = resolvedModel?.limit.output ?? this.gatewayConfig.defaultMaxOutputTokens;
     const totalEstimatedTokens = estimatedInputTokens + toolsOverhead;
-    const conservativeInputEstimate = Math.ceil(totalEstimatedTokens * 1.2);
-    const bufferTokens = 256;
+
+    // Dynamic buffer: smaller buffer when input is high to ensure output capacity
+    const inputPercentage = totalEstimatedTokens / modelMaxContext;
+    let bufferTokens: number;
+    let conservativeMultiplier: number;
+
+    if (inputPercentage > 0.8) {
+      // High usage: minimal buffer, no conservative multiplier
+      bufferTokens = 128;
+      conservativeMultiplier = 1.0;
+    } else if (inputPercentage > 0.6) {
+      // Medium usage: moderate buffer
+      bufferTokens = 192;
+      conservativeMultiplier = 1.1;
+    } else {
+      // Low usage: standard buffer
+      bufferTokens = 256;
+      conservativeMultiplier = 1.2;
+    }
+
+    const conservativeInputEstimate = Math.ceil(totalEstimatedTokens * conservativeMultiplier);
 
     let safeMaxOutputTokens = Math.min(
       defaultMaxOutput,
       Math.floor(modelMaxContext - conservativeInputEstimate - bufferTokens)
     );
 
-    return Math.max(64, safeMaxOutputTokens);
+    // Ensure minimum 4K output capacity for reasonable responses
+    const minOutputTokens = Math.min(4096, Math.floor(modelMaxContext * 0.2));
+    return Math.max(minOutputTokens, safeMaxOutputTokens);
   }
 
   /**
@@ -1251,15 +1716,15 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     this.currentToolSchemas.clear();
 
-    return options.tools.map((tool) => {
-      this.outputChannel.appendLine(`Tool: ${tool.name}`);
-      this.outputChannel.appendLine(`  Description: ${tool.description?.substring(0, 100) || 'none'}...`);
-
+    const tools = options.tools.map((tool) => {
       const schema = tool.inputSchema as Record<string, unknown> | undefined;
       this.currentToolSchemas.set(tool.name, schema);
 
+      // Log detailed tool info only in debug mode
+      this.logService.debug('Tool', `Tool: ${tool.name}`);
+      this.logService.debug('Tool', `  Description: ${tool.description?.substring(0, 100) || 'none'}...`);
       if (schema?.required && Array.isArray(schema.required)) {
-        this.outputChannel.appendLine(`  Required properties: ${(schema.required as string[]).join(', ')}`);
+        this.logService.debug('Tool', `  Required properties: ${(schema.required as string[]).join(', ')}`);
       }
 
       return {
@@ -1267,6 +1732,11 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         function: { name: tool.name, description: tool.description, parameters: tool.inputSchema },
       };
     });
+
+    // Log summary in info mode
+    this.logService.info('Tool', `Built ${tools.length} tool schemas`);
+
+    return tools;
   }
 
   /**
@@ -1276,20 +1746,18 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     toolCall: { id: string; name: string; arguments: string },
     progress: vscode.Progress<vscode.LanguageModelResponsePart>
   ): void {
-    this.outputChannel.appendLine(`\n=== TOOL CALL RECEIVED ===`);
-    this.outputChannel.appendLine(`  ID: ${toolCall.id}`);
-    this.outputChannel.appendLine(`  Name: ${toolCall.name}`);
-    this.outputChannel.appendLine(`  Raw arguments: ${toolCall.arguments.substring(0, 1000)}${toolCall.arguments.length > 1000 ? '...' : ''}`);
+    this.logService.info('Tool', `Received: id=${toolCall.id}, name=${toolCall.name}`);
+    this.logService.debug('Tool', `  Raw arguments: ${toolCall.arguments.substring(0, 500)}${toolCall.arguments.length > 500 ? '...' : ''}`);
 
     let args = this.tryRepairJson(toolCall.arguments) as Record<string, unknown> | null;
 
     if (args === null) {
-      this.outputChannel.appendLine(`  ERROR: Failed to parse tool call arguments`);
-      this.outputChannel.appendLine(`  Full arguments: ${toolCall.arguments}`);
+      this.logService.error('Tool', `Failed to parse tool call arguments for ${toolCall.name}`);
+      this.logService.debug('Tool', `  Full arguments: ${toolCall.arguments}`);
       args = {};
     } else {
       const argKeys = Object.keys(args);
-      this.outputChannel.appendLine(`  Parsed argument keys: ${argKeys.length > 0 ? argKeys.join(', ') : '(none)'}`);
+      this.logService.debug('Tool', `  Parsed argument keys: ${argKeys.length > 0 ? argKeys.join(', ') : '(none)'}`);
     }
 
     const toolSchema = this.currentToolSchemas.get(toolCall.name) as Record<string, unknown> | undefined;
@@ -1297,7 +1765,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       args = this.fillMissingRequiredProperties(args, toolCall.name, toolSchema);
     }
 
-    this.outputChannel.appendLine(`=== END TOOL CALL ===\n`);
+    this.logService.debug('Tool', `Completed processing tool call: ${toolCall.name}`);
     progress.report(new vscode.LanguageModelToolCallPart(toolCall.id, toolCall.name, args));
   }
 
@@ -1405,35 +1873,35 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     // Get the client for this provider
     const client = this.getClient(providerId);
 
+    // Check if using Anthropic format (needed for thinking configuration and streaming)
+    const provider = this.configManager.getProvider(providerId);
+    const isAnthropic = provider?.apiFormat === 'anthropic';
+
     // Convert messages and categorize tokens
     const { messages: openAIMessages, categoryTokens } = await this.convertMessagesWithCategories(messages, model, token);
     const { messagesTokens, filesTokens, toolResultsTokens } = categoryTokens;
     this.outputChannel.appendLine(`Converted to ${openAIMessages.length} OpenAI messages`);
     this.outputChannel.appendLine(`Token breakdown: messages=${messagesTokens}, files=${filesTokens}, toolResults=${toolResultsTokens}`);
 
-    // Log message structure
-    for (let i = 0; i < openAIMessages.length; i++) {
-      const msg = openAIMessages[i];
-      const toolCallId = typeof msg.tool_call_id === 'string' ? msg.tool_call_id : 'none';
-      this.outputChannel.appendLine(`  Message ${i + 1}: role=${msg.role}, hasContent=${!!msg.content}, hasToolCalls=${!!msg.tool_calls}, toolCallId=${toolCallId}`);
+    // Log message structure (only in debug mode)
+    if (this.debugLogsEnabled) {
+      for (let i = 0; i < openAIMessages.length; i++) {
+        const msg = openAIMessages[i];
+        const toolCallId = typeof msg.tool_call_id === 'string' ? msg.tool_call_id : 'none';
+        this.outputChannel.appendLine(`  Message ${i + 1}: role=${msg.role}, hasContent=${!!msg.content}, hasToolCalls=${!!msg.tool_calls}, toolCallId=${toolCallId}`);
+      }
     }
 
-    // Calculate token limits and truncate
+    // Calculate token limits (for display only, don't truncate - Copilot Chat manages context)
     const modelMaxContext = resolvedModel?.limit.context ?? this.gatewayConfig.defaultMaxTokens;
     const desiredOutputTokens = Math.min(
       resolvedModel?.limit.output ?? this.gatewayConfig.defaultMaxOutputTokens,
       Math.floor(modelMaxContext / 2)
     );
-    const toolsTokenEstimate = options.tools ? Math.ceil(this.safeStringify(options.tools).length / 4 * 1.2) : 0;
-    const maxInputTokens = modelMaxContext - desiredOutputTokens - toolsTokenEstimate - 256;
+    const toolsTokenEstimate = options.tools ? await this.provideTokenCount(model, this.safeStringify(options.tools), token) : 0;
 
-    const truncatedMessages = this.truncateMessagesToFit(openAIMessages, maxInputTokens);
-    if (truncatedMessages.length < openAIMessages.length) {
-      this.outputChannel.appendLine(`WARNING: Truncated conversation from ${openAIMessages.length} to ${truncatedMessages.length} messages to fit context limit`);
-    }
-
-    // Build input text for token estimation
-    const inputText = truncatedMessages
+    // Build input text for token estimation using full messages (Copilot Chat manages context)
+    const inputText = openAIMessages
       .map((m) => {
         let text = typeof m.content === 'string' ? m.content : this.safeStringify(m.content || '');
         if (m.tool_calls) { text += this.safeStringify(m.tool_calls); }
@@ -1441,18 +1909,16 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       })
       .join('\n');
 
-    const toolsOverhead = options.tools ? Math.ceil(this.safeStringify(options.tools).length / 4) : 0;
+    const toolsOverhead = options.tools ? await this.provideTokenCount(model, this.safeStringify(options.tools), token) : 0;
     const estimatedInputTokens = await this.provideTokenCount(model, inputText, token) + toolsOverhead;
     const safeMaxOutputTokens = this.calculateSafeMaxOutputTokens(estimatedInputTokens, toolsOverhead, model.id);
 
-    this.outputChannel.appendLine(
-      `Token estimate: input=${estimatedInputTokens}, tools=${toolsOverhead}, model_context=${modelMaxContext}, chosen_max_tokens=${safeMaxOutputTokens}`
-    );
+    this.logService.info('Token', `Estimate: input=${estimatedInputTokens}, tools=${toolsOverhead}, context=${modelMaxContext}, output=${safeMaxOutputTokens}`);
 
     // Update token statistics display if enabled
     if (tokenStatisticsEnabled) {
-      // Calculate total tokens including tools overhead
-      const totalTokens = estimatedInputTokens + toolsOverhead;
+      // Calculate total tokens (estimatedInputTokens already includes tools overhead)
+      const totalTokens = estimatedInputTokens;
 
       // Calculate percentages based on categorized tokens
       const systemTokens = Math.floor(totalTokens * 0.13); // System Instructions ~13%
@@ -1501,20 +1967,40 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
       this.outputChannel.appendLine(`[Token Statistics Debug] Total details items: ${details.length}`);
 
+      // Save details for later updates
+      this.currentTokenDetails = details;
+
       this.updateTokenStatusBar(totalTokens, modelMaxContext, reservedOutputTokens, details);
     }
 
     // Build request
     const hasTools = (modelCapabilities?.toolCalling ?? this.gatewayConfig.enableToolCalling) &&
                      options.tools && options.tools.length > 0;
-    const temperature = hasTools ? (this.gatewayConfig.agentTemperature ?? 0) : 0.7;
 
     const requestOptions: Record<string, unknown> = {
       model: model.id,
-      messages: truncatedMessages,
+      messages: openAIMessages,
       max_tokens: safeMaxOutputTokens,
-      temperature,
     };
+
+    // Add sampling parameters ONLY if explicitly configured
+    // Temperature: use model config > tool mode default, or don't send if neither
+    if (resolvedModel?.options?.temperature !== undefined) {
+      requestOptions.temperature = resolvedModel.options.temperature;
+    } else if (hasTools) {
+      requestOptions.temperature = this.gatewayConfig.agentTemperature ?? 0;
+    }
+    // If neither configured, don't send temperature (let server use default)
+
+    if (resolvedModel?.options?.topP !== undefined) {
+      requestOptions.top_p = resolvedModel.options.topP;
+    }
+    if (resolvedModel?.options?.frequencyPenalty !== undefined) {
+      requestOptions.frequency_penalty = resolvedModel.options.frequencyPenalty;
+    }
+    if (resolvedModel?.options?.presencePenalty !== undefined) {
+      requestOptions.presence_penalty = resolvedModel.options.presencePenalty;
+    }
 
     const toolsConfig = this.buildToolsConfig(options, modelCapabilities);
     if (toolsConfig) {
@@ -1527,22 +2013,72 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     }
 
     // Add model-specific options (e.g., thinking configuration)
-    if (resolvedModel?.options?.thinking) {
-      requestOptions.thinking = resolvedModel.options.thinking;
-      this.outputChannel.appendLine(`Thinking enabled: type=${resolvedModel.options.thinking.type}, budgetTokens=${resolvedModel.options.thinking.budgetTokens || 'default'}`);
+    if (resolvedModel?.options?.thinking && resolvedModel.options.thinking.type === 'enabled') {
+      const thinking = resolvedModel.options.thinking;
+
+      // Get user-selected effort from model configuration
+      // If user selected from dropdown, use that value
+      // Otherwise, use config default (effort) or first available level
+      const userSelectedEffort = (options as unknown as Record<string, unknown>)?.modelConfiguration?.reasoningEffort;
+      const configEffort = thinking.effort;
+      const availableLevels = thinking.levels;
+
+      // Determine effective effort:
+      // 1. User selected from dropdown (highest priority)
+      // 2. Configured effort value
+      // 3. First available level (if levels configured)
+      // 4. undefined (use API default)
+      let effectiveEffort: string | undefined;
+      if (typeof userSelectedEffort === 'string') {
+        effectiveEffort = userSelectedEffort;
+      } else if (configEffort) {
+        effectiveEffort = configEffort;
+      } else if (availableLevels && availableLevels.length > 0) {
+        effectiveEffort = availableLevels[0];
+      }
+
+      // Handle different API formats for thinking configuration
+      if (isAnthropic) {
+        // Anthropic format: { type: 'enabled', budget_tokens: number }
+        // Only send thinking object if budgetTokens is specified
+        if (thinking.budgetTokens) {
+          requestOptions.thinking = {
+            type: thinking.type,
+            budget_tokens: thinking.budgetTokens,
+          };
+        }
+      } else {
+        // OpenAI-compatible format
+        // For o1/o3 models: reasoning_effort field
+        if (effectiveEffort) {
+          requestOptions.reasoning_effort = effectiveEffort;
+        }
+
+        // Some APIs may use thinking object
+        if (thinking.budgetTokens) {
+          requestOptions.thinking = {
+            type: thinking.type,
+            budget_tokens: thinking.budgetTokens,
+          };
+        }
+      }
+
+      this.outputChannel.appendLine(
+        `Thinking configured: type=${thinking.type}, ` +
+        `${effectiveEffort ? `effort=${effectiveEffort}${userSelectedEffort ? ' (user selected)' : ' (config default)'}, ` : 'effort=API default, '}` +
+        `${thinking.budgetTokens ? `budgetTokens=${thinking.budgetTokens}` : 'budgetTokens=API default'}`
+      );
     }
 
     if (options.modelOptions) {
       Object.assign(requestOptions, options.modelOptions);
     }
 
-    // Log request
-    const debugRequest = this.safeStringify(requestOptions);
-    this.outputChannel.appendLine(debugRequest.length > 2000 ? `Request (truncated): ${debugRequest.substring(0, 2000)}...` : `Request: ${debugRequest}`);
-
-    // Check if using Anthropic format
-    const provider = this.configManager.getProvider(providerId);
-    const isAnthropic = provider?.apiFormat === 'anthropic';
+    // Log request (only when message debug enabled)
+    if (this.messageDebugLogsEnabled) {
+      const debugRequest = this.safeStringify(requestOptions);
+      this.outputChannel.appendLine(debugRequest.length > 2000 ? `Request (truncated): ${debugRequest.substring(0, 2000)}...` : `Request: ${debugRequest}`);
+    }
 
     try {
       let totalContent = '';
@@ -1563,10 +2099,19 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           }
 
           // Handle thinking content from Claude 3.7+
+          // Try to use LanguageModelThinkingPart if available (VS Code API), otherwise accumulate silently
           if (chunk.thinking) {
             totalContent += chunk.thinking;
-            // Report thinking as text content since LanguageModelThinkingPart may not be available
-            progress.report(new vscode.LanguageModelTextPart(chunk.thinking));
+            // Try to report as ThinkingPart for collapsible UI, fallback to silent accumulation
+            try {
+              // @ts-ignore - LanguageModelThinkingPart may not be in the types yet
+              if (vscode.LanguageModelThinkingPart) {
+                // @ts-ignore
+                progress.report(new vscode.LanguageModelThinkingPart(chunk.thinking));
+              }
+            } catch {
+              // ThinkingPart not available, don't expose thinking to user
+            }
           }
 
           // Capture usage data (Anthropic usually provides this)
@@ -1593,9 +2138,18 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           }
 
           // Handle reasoning_content (thinking) from OpenAI-compatible APIs (e.g., DeepSeek, Qwen)
+          // Try to use LanguageModelThinkingPart if available for collapsible UI
           if (chunk.reasoning) {
             totalContent += chunk.reasoning;
-            progress.report(new vscode.LanguageModelTextPart(chunk.reasoning));
+            try {
+              // @ts-ignore - LanguageModelThinkingPart may not be in the types yet
+              if (vscode.LanguageModelThinkingPart) {
+                // @ts-ignore
+                progress.report(new vscode.LanguageModelThinkingPart(chunk.reasoning));
+              }
+            } catch {
+              // ThinkingPart not available, don't expose thinking to user
+            }
           }
 
           // Capture usage data if provided by API
@@ -1621,7 +2175,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         this.outputChannel.appendLine(`Estimated completion tokens from content length: ${completionTokens}`);
       }
 
-      this.outputChannel.appendLine(`Completed chat request, received ${totalContent.length} characters, ${totalToolCalls} tool calls`);
+      this.logService.info('Response', `Completed: ${totalContent.length} chars, ${totalToolCalls} tool calls`);
 
       // Report token usage to VS Code for context window display
       if (promptTokens > 0 || completionTokens > 0) {
@@ -1693,8 +2247,28 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
             this.outputChannel.appendLine(`Token usage via usage() failed (API may have changed): ${usageError}`);
           }
         } else {
-          this.outputChannel.appendLine(`Token usage tracking: prompt=${promptTokens}, completion=${completionTokens}`);
+          this.outputChannel.appendLine(`Token usage tracking: prompt=${promptTokens}, completion=${completionTokens}, total=${promptTokens + completionTokens}`);
         }
+
+        // Log detailed token breakdown from API
+        this.outputChannel.appendLine(`[Token API Response] prompt_tokens=${promptTokens}, completion_tokens=${completionTokens}, total_tokens=${promptTokens + completionTokens}`);
+        this.outputChannel.appendLine(`[Token Comparison] estimated_input=${estimatedInputTokens}, actual_prompt=${promptTokens}, diff=${promptTokens - estimatedInputTokens}`);
+
+        // Update status bar after conversation completes with ACTUAL token counts from API
+        // This gives us accurate picture of token usage including precise image token counts
+        const totalTokens = promptTokens + completionTokens;
+        this.currentSessionPromptTokens = promptTokens;
+        this.currentSessionCompletionTokens = completionTokens;
+        // Calculate reserved tokens for next response
+        const modelMaxContext = resolvedModel?.limit.context ?? this.gatewayConfig.defaultMaxTokens;
+        const desiredOutputTokens = Math.min(
+          resolvedModel?.limit.output ?? this.gatewayConfig.defaultMaxOutputTokens,
+          Math.floor(modelMaxContext / 2)
+        );
+        const reservedForNext = Math.max(64, desiredOutputTokens - completionTokens);
+        // Use saved details to preserve category breakdown
+        this.outputChannel.appendLine(`[Token Debug] Before update: estimated=${estimatedInputTokens}, API returned prompt=${promptTokens}, completion=${completionTokens}, total=${totalTokens}`);
+        this.updateTokenStatusBar(totalTokens, modelMaxContext, reservedForNext, this.currentTokenDetails);
       }
 
       if (totalContent.length === 0 && totalToolCalls === 0) {
@@ -1738,8 +2312,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           if (part instanceof vscode.LanguageModelTextPart) {
             parts.push(part.value);
           } else if (part instanceof vscode.LanguageModelToolResultPart) {
-            // Include tool result content
-            parts.push(`Tool result: ${part.callId}`);
+            // IMPROVED: Include actual tool result content for accurate token counting
+            const toolResultContent = this.extractToolResultContent(part);
+            parts.push(toolResultContent);
           } else if (part instanceof vscode.LanguageModelToolCallPart) {
             // Include tool call content
             parts.push(`Tool call: ${part.name}`);
@@ -1789,6 +2364,123 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       }
       return count;
     }
+  }
+
+  /**
+   * Calculate image tokens based on OpenAI/GPT-4V formula:
+   * 1. Resize to fit within 2048x2048 (maintaining aspect ratio)
+   * 2. Scale so shortest side is 768px (optional, for low detail mode)
+   * 3. Divide into 512x512 tiles
+   * 4. Token count = (num_tiles_x * num_tiles_y) * 170 + 85 (base tokens)
+   *
+   * Simplified formula: tokens = ceil(width/512) * ceil(height/512) * 170 + 85
+   */
+  private calculateImageTokens(data: Uint8Array, mimeType: string): number {
+    // Try to extract dimensions from image data
+    const dimensions = this.extractImageDimensions(data, mimeType);
+
+    if (dimensions) {
+      const { width, height } = dimensions;
+
+      // Step 1: Resize to fit within 2048x2048
+      let w = width;
+      let h = height;
+      const maxSize = 2048;
+      if (w > maxSize || h > maxSize) {
+        const scale = maxSize / Math.max(w, h);
+        w = Math.floor(w * scale);
+        h = Math.floor(h * scale);
+      }
+
+      // Step 2: Calculate tiles (512x512 each)
+      const tilesX = Math.ceil(w / 512);
+      const tilesY = Math.ceil(h / 512);
+      const totalTiles = tilesX * tilesY;
+
+      // Step 3: Calculate tokens (170 per tile + 85 base)
+      const tokens = totalTiles * 170 + 85;
+
+      this.outputChannel.appendLine(`  Image dimensions: ${width}x${height} -> scaled ${w}x${h}, tiles: ${tilesX}x${tilesY}=${totalTiles}, tokens: ${tokens}`);
+      return tokens;
+    }
+
+    // Fallback: estimate based on file size
+    // This is less accurate but provides a reasonable estimate
+    const fileSizeKB = data.length / 1024;
+    // Assume 1KB ≈ 8 tiles (rough estimate for compressed images)
+    const estimatedTiles = Math.max(1, Math.ceil(fileSizeKB / 8));
+    const tokens = estimatedTiles * 170 + 85;
+
+    this.outputChannel.appendLine(`  Image size: ${fileSizeKB.toFixed(2)}KB, estimated tiles: ${estimatedTiles}, tokens: ${tokens} (dimensions unknown)`);
+    return tokens;
+  }
+
+  /**
+   * Extract image dimensions from binary data
+   * Supports PNG, JPEG, GIF, WebP
+   */
+  private extractImageDimensions(data: Uint8Array, mimeType: string): { width: number; height: number } | null {
+    try {
+      const buffer = Buffer.from(data);
+
+      // PNG: dimensions at offset 16-24 (big-endian)
+      if (mimeType === 'image/png') {
+        if (buffer.length >= 24 && buffer.toString('hex', 0, 8) === '89504e470d0a1a0a') {
+          const width = buffer.readUInt32BE(16);
+          const height = buffer.readUInt32BE(20);
+          return { width, height };
+        }
+      }
+
+      // JPEG: parse SOF markers
+      if (mimeType === 'image/jpeg' || mimeType === 'image/jpg') {
+        let offset = 2; // Skip SOI marker
+        while (offset < buffer.length - 8) {
+          if (buffer[offset] !== 0xff) {
+            offset++;
+            continue;
+          }
+          const marker = buffer[offset + 1];
+          // SOF0, SOF1, SOF2, SOF3, SOF5, SOF6, SOF7, SOF9, SOF10, SOF11, SOF13, SOF14, SOF15
+          if ((marker >= 0xc0 && marker <= 0xc3) || (marker >= 0xc5 && marker <= 0xc7) ||
+              (marker >= 0xc9 && marker <= 0xcb) || (marker >= 0xcd && marker <= 0xcf)) {
+            const height = buffer.readUInt16BE(offset + 5);
+            const width = buffer.readUInt16BE(offset + 7);
+            return { width, height };
+          }
+          // Skip segment
+          const segmentLength = buffer.readUInt16BE(offset + 2);
+          offset += 2 + segmentLength;
+        }
+      }
+
+      // GIF: dimensions at offset 6-10 (little-endian)
+      if (mimeType === 'image/gif') {
+        const sig = buffer.toString('ascii', 0, 6);
+        if (buffer.length >= 10 && (sig === 'GIF87a' || sig === 'GIF89a')) {
+          const width = buffer.readUInt16LE(6);
+          const height = buffer.readUInt16LE(8);
+          return { width, height };
+        }
+      }
+
+      // WebP: VP8 or VP8L chunk
+      if (mimeType === 'image/webp') {
+        if (buffer.length >= 30 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') {
+          // Try VP8 (lossy) - simplified
+          const vp8Index = buffer.indexOf(Buffer.from('VP8 '), 12);
+          if (vp8Index !== -1 && buffer.length >= vp8Index + 14) {
+            // VP8 dimensions in bitstream (simplified extraction)
+            const width = buffer.readUInt16LE(vp8Index + 10) & 0x3fff;
+            const height = buffer.readUInt16LE(vp8Index + 8) & 0x3fff;
+            if (width > 0 && height > 0) return { width, height };
+          }
+        }
+      }
+    } catch (error) {
+      this.outputChannel.appendLine(`  Failed to extract image dimensions: ${error}`);
+    }
+    return null;
   }
 
   /**

@@ -3,6 +3,37 @@ import { ProviderManager } from './manager';
 import { ConfigManager } from './config/ConfigManager';
 import { registerConfigCommands } from './commands';
 import { TokenUsageViewProvider } from './views/TokenUsageView';
+import { LogService } from './services/LogService';
+
+// Global status bar item - survives provider reloads
+let globalTokenStatusBarItem: vscode.StatusBarItem | undefined;
+
+/**
+ * Get or create global status bar item
+ */
+export function getGlobalStatusBarItem(): vscode.StatusBarItem | undefined {
+  return globalTokenStatusBarItem;
+}
+
+/**
+ * Initialize global status bar item
+ */
+export function initGlobalStatusBarItem(context: vscode.ExtensionContext): vscode.StatusBarItem | undefined {
+  const config = vscode.workspace.getConfiguration('github.copilot.llm-gateway');
+  const tokenStatisticsEnabled = config.get<boolean>('enableTokenStatistics', true);
+
+  if (tokenStatisticsEnabled) {
+    if (!globalTokenStatusBarItem) {
+      globalTokenStatusBarItem = vscode.window.createStatusBarItem(
+        vscode.StatusBarAlignment.Right,
+        100
+      );
+      globalTokenStatusBarItem.command = 'github.copilot.llm-gateway.statusBarNoOp';
+      context.subscriptions.push(globalTokenStatusBarItem);
+    }
+  }
+  return globalTokenStatusBarItem;
+}
 
 /**
  * Extension activation
@@ -13,8 +44,25 @@ export async function activate(context: vscode.ExtensionContext) {
   const outputChannel = vscode.window.createOutputChannel('GitHub Copilot LLM Gateway');
   outputChannel.appendLine('Extension activating...');
 
+  // Initialize LogService with configuration
+  const config = vscode.workspace.getConfiguration('github.copilot.llm-gateway');
+  const logLevel = config.get<string>('logLevel', 'info');
+  const logShowTimestamp = config.get<boolean>('logShowTimestamp', false);
+  const logDetailedToolInfo = config.get<boolean>('logDetailedToolInfo', false);
+
+  const logService = new LogService(outputChannel, {
+    level: logLevel as 'error' | 'warning' | 'info' | 'debug',
+    showTimestamp: logShowTimestamp,
+    detailedToolInfo: logDetailedToolInfo,
+  });
+
+  logService.info('Config', 'Extension activating...');
+
+  // Initialize global status bar (survives provider reloads)
+  initGlobalStatusBarItem(context);
+
   // Create ProviderManager
-  const providerManager = new ProviderManager(context, outputChannel);
+  const providerManager = new ProviderManager(context, outputChannel, logService);
 
   // Initialize and register all providers
   await providerManager.initialize();
@@ -127,6 +175,30 @@ function registerCommands(
     }
   );
   context.subscriptions.push(compactContextCommand);
+
+  // Show token usage command (called when clicking status bar)
+  const showTokenUsageCommand = vscode.commands.registerCommand(
+    'github.copilot.llm-gateway.showTokenUsage',
+    async () => {
+      const provider = providerManager.getProvider();
+      if (provider) {
+        await provider.showTokenUsage();
+      } else {
+        vscode.window.showErrorMessage('LLM Gateway: Provider not initialized.');
+      }
+    }
+  );
+  context.subscriptions.push(showTokenUsageCommand);
+
+  // No-op command for status bar click (just visual feedback, tooltip reappears)
+  const statusBarNoOpCommand = vscode.commands.registerCommand(
+    'github.copilot.llm-gateway.statusBarNoOp',
+    () => {
+      // Intentionally empty - clicking provides visual feedback
+      // but tooltip immediately reappears if mouse is still over the status bar
+    }
+  );
+  context.subscriptions.push(statusBarNoOpCommand);
 
   outputChannel.appendLine(`Registered commands`);
 }

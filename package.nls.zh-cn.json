@@ -27,6 +27,8 @@
   "config.enableDebugLogs.markdownDescription": "启用后，将常规调试信息输出到 LLM Gateway 输出通道。默认值：false",
   "config.enableTokenDebugLogs.description": "启用 Token 计数调试日志",
   "config.enableTokenDebugLogs.markdownDescription": "启用后，将详细的 Token 计数日志输出到 LLM Gateway 输出通道。此选项会产生大量日志。默认值：false",
+  "config.enableMessageDebugLogs.description": "启用消息内容调试日志",
+  "config.enableMessageDebugLogs.markdownDescription": "启用后，将详细的消息内容、系统提示词和请求体输出到 LLM Gateway 输出通道。此选项会产生非常详细的日志。默认值：false",
   "config.enableTokenStatistics.description": "启用 Token 使用量统计和状态栏显示",
   "config.enableTokenStatistics.markdownDescription": "启用后，在状态栏显示当前会话 Token 使用百分比，并允许手动压缩上下文。默认值：true",
   "config.enableCopilotUsageReport.description": "向 Copilot Chat 上下文窗口报告 Token 使用量（实验性）",
@@ -66,5 +68,15 @@
   "token.contextCompressed": "聊天历史已清除，Token 使用量减少",
   "token.compressConfirmMessage": "Token 使用: {0} / {1}\n\n是否压缩上下文以减少 Token 使用？",
   "token.compressButton": "压缩",
-  "token.cancelButton": "取消"
+  "token.cancelButton": "取消",
+  "Thinking Effort": "思考等级",
+  "Faster responses with less reasoning": "响应更快，推理较少",
+  "Balanced reasoning and speed": "平衡推理与速度",
+  "Maximum reasoning depth": "最大推理深度",
+  "config.logLevel.description": "输出面板的日志级别 (error, warning, info, debug)",
+  "config.logLevel.markdownDescription": "控制输出面板中日志的详细程度。**error**: 仅错误信息；**warning**: 警告和错误；**info**: 关键流程信息（默认）；**debug**: 详细信息，包括工具定义和Token计算",
+  "config.logShowTimestamp.description": "在日志输出中显示时间戳",
+  "config.logShowTimestamp.markdownDescription": "在输出面板的每行日志前添加时间戳",
+  "config.logDetailedToolInfo.description": "在日志中显示详细的工具信息",
+  "config.logDetailedToolInfo.markdownDescription": "启用后，在调试日志中显示完整的工具定义，包括描述和参数"
 }

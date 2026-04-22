@@ -280,6 +280,12 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     }
 
     this.outputChannel.appendLine('[Token Statistics] Opening Copilot Chat with /compact command');
+
+    // Reset token statistics before compacting
+    this.currentContextTokens = 0;
+    this.currentTokenDetails = undefined;
+    this.updateTokenStatusBar(0, this.currentModelMaxTokens, 0, []);
+
     await vscode.commands.executeCommand('workbench.panel.chat.view.copilot.focus');
     await vscode.commands.executeCommand('type', { text: '/compact' });
     await vscode.commands.executeCommand('workbench.action.chat.submit');
@@ -1917,8 +1923,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     // Update token statistics display if enabled
     if (tokenStatisticsEnabled) {
-      // Calculate total tokens (estimatedInputTokens already includes tools overhead)
-      const totalTokens = estimatedInputTokens;
+      // Calculate total tokens from categories (not from estimatedInputTokens to avoid double counting)
+      // estimatedInputTokens includes all content, but we want to show breakdown by category
+      const categorizedTotal = messagesTokens + filesTokens + toolResultsTokens + toolsOverhead;
+      const totalTokens = Math.max(estimatedInputTokens, categorizedTotal);
 
       // Calculate percentages based on categorized tokens
       const systemTokens = Math.floor(totalTokens * 0.13); // System Instructions ~13%

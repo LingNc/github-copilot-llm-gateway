@@ -65,7 +65,7 @@ npm run package
 - [x] **计划 1**: Token 分类统计完善（Files 和 Tool Results）
 - [x] **问题修复**: 思考等级本地化（使用英文原文作为l10n key）
 - [x] **问题修复**: config-priority模式优化（有配置时跳过API请求）
-- [ ] **问题排查**: 模型重复显示（VS Code/Copilot缓存问题）
+- [x] **问题修复**: 不同提供商重名模型ID冲突问题（添加provider前缀如`newapi/kimi-k2.5`）
 - [x] **计划 2**: 后台输出优化（日志级别、美化格式、工具信息简化）- 已完成
 - [ ] **计划 3**: provider.ts 重构拆分（单文件近3000行，按功能拆分为多模块）
 - [ ] **计划 4**: Token 估算算法优化（precise/fast-estimate/none 模式）
@@ -163,7 +163,7 @@ npm run package
 
 **目标**: 将庞大的 provider.ts 按功能拆分为多个模块，提高代码可维护性
 
-**背景**: 
+**背景**:
 - 当前 `src/provider.ts` 已近 3000 行，包含多个职责：
   - 语言模型提供程序核心逻辑
   - Token 计算和管理
@@ -332,9 +332,34 @@ src/provider/
 
 ### 已知问题
 
-#### 模型重复显示问题
+#### 不同提供商重名模型冲突（已修复 - v1.1.6）
+
+**症状**: 不同提供商配置相同ID的模型（如都配置 `kimi-k2.5`），只显示第一个提供商的模型
+
+**原因**: 模型ID没有包含提供商前缀，导致 VS Code 语言模型API中模型ID冲突
+
+**修复方案**:
+- 模型ID格式改为 `providerId/modelId`（如 `newapi/kimi-k2.5`, `bailian/kimi-k2.5`）
+- 修改 `findModelAndProvider()` 方法解析带前缀的ID
+- 向后兼容：支持无前缀的模型ID（搜索所有提供商）
+
+**相关代码**: `src/provider.ts` 中的 `buildModelInfoFromConfig()`, `fetchModelsWithConfigPriority()`, `fetchModelsWithApiPriority()`, `findModelAndProvider()`
+
+**后续修复（2026-04-23）**:
+- 修复请求下发时误用带前缀模型ID导致的 `503 model_not_found`
+- 现在模型选择仍使用 `providerId/modelId`，但发送给上游API时使用真实模型ID `modelId`
+- 相关代码：`src/provider.ts` 中请求构建位置（`buildRequestOptions()` 与 `provideLanguageModelChatResponse()`）
+
+---
+
+#### 模型重复显示问题（VS Code 缓存）
 
 **症状**: 在模型选择器中，每个模型显示两次
+
+**分析**:
+- 在全新 VS Code 实例（其他电脑）上测试正常，说明扩展代码本身无重复
+- 问题仅在当前 VS Code 实例出现，可能是 VS Code 或 Copilot Chat 内部缓存导致
+- 日志显示每次调用返回的模型数量正确，无重复 ID
 
 **分析**:
 - 在全新 VS Code 实例（其他电脑）上测试正常，说明扩展代码本身无重复
@@ -381,6 +406,12 @@ src/provider/
 ---
 
 ### 发布历史
+
+#### v1.1.6 (2026-04-23)
+**问题修复 - 不同提供商重名模型ID冲突**
+- 模型ID格式改为 `providerId/modelId`（如 `newapi/kimi-k2.5`）
+- 修复不同提供商配置相同模型ID时只显示第一个的问题
+- 向后兼容：支持无前缀的模型ID（搜索所有提供商）
 
 #### v1.1.5 (2026-04-02)
 **计划 2 完成 - 后台输出优化**

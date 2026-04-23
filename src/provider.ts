@@ -332,15 +332,30 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
   /**
    * Find provider and model config by model ID
+   * Model ID is in format "providerId/modelId" (e.g., "newapi/kimi-k2.5")
    */
   private findModelAndProvider(modelId: string): { providerId: string; model: ResolvedModel } | undefined {
-    const providers = this.configManager.getProviders();
-
-    for (const provider of providers) {
-      const model = this.configManager.getModel(provider.id, modelId);
-      if (model) {
-        return { providerId: provider.id, model };
+    // Parse the prefixed model ID: "providerId/modelId"
+    const slashIndex = modelId.indexOf('/');
+    if (slashIndex === -1) {
+      // Backward compatibility: if no prefix, search all providers
+      const providers = this.configManager.getProviders();
+      for (const provider of providers) {
+        const model = this.configManager.getModel(provider.id, modelId);
+        if (model) {
+          return { providerId: provider.id, model };
+        }
       }
+      return undefined;
+    }
+
+    const providerId = modelId.substring(0, slashIndex);
+    const actualModelId = modelId.substring(slashIndex + 1);
+
+    // Get the specific provider
+    const model = this.configManager.getModel(providerId, actualModelId);
+    if (model) {
+      return { providerId, model };
     }
 
     return undefined;
@@ -692,8 +707,12 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       `Token estimate: input=${estimatedInputTokens}, model_context=${modelMaxContext}, chosen_max_tokens=${safeMaxOutputTokens}`
     );
 
+    // Send upstream model ID without provider prefix (e.g. "kimi-k2.5"),
+    // while model.id in VS Code can be prefixed (e.g. "newapi/kimi-k2.5").
+    const requestModelId = resolvedModel?.id ?? model.id;
+
     const requestOptions: any = {
-      model: model.id,
+      model: requestModelId,
       messages: openAIMessages,
       max_tokens: safeMaxOutputTokens,
       temperature: 0.7,
@@ -1241,8 +1260,11 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       // Build configuration schema if model supports thinking effort
       const configurationSchema = this.buildConfigurationSchema(model);
 
+      // Use provider-prefixed model ID to avoid conflicts between providers
+      const prefixedModelId = `${providerId}/${model.id}`;
+
       return {
-        id: model.id,
+        id: prefixedModelId,
         name: formattedName,
         family: providerId, // Use providerId as family for grouping
         maxInputTokens: model.limit.context,
@@ -1281,8 +1303,11 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       // Build configuration schema if model supports thinking effort
       const configurationSchema = this.buildConfigurationSchema(model);
 
-      modelMap.set(model.id, {
-        id: model.id,
+      // Use provider-prefixed model ID to avoid conflicts between providers
+      const prefixedModelId = `${providerId}/${model.id}`;
+
+      modelMap.set(prefixedModelId, {
+        id: prefixedModelId,
         name: formatName(model.name),
         family: providerId,
         maxInputTokens: model.limit.context,
@@ -1318,12 +1343,15 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         // Use display_name from API if available
         const displayName = apiModel.display_name || apiModel.id;
 
+        // Use provider-prefixed model ID to avoid conflicts between providers
+        const prefixedModelId = `${providerId}/${apiModel.id}`;
+
         this.outputChannel.appendLine(
-          `    API model: ${apiModel.id} (vision=${hasVision}, reasoning=${hasReasoning}, context=${contextLength})`
+          `    API model: ${apiModel.id} -> ${prefixedModelId} (vision=${hasVision}, reasoning=${hasReasoning}, context=${contextLength})`
         );
 
-        modelMap.set(apiModel.id, {
-          id: apiModel.id,
+        modelMap.set(prefixedModelId, {
+          id: prefixedModelId,
           name: formatName(displayName),
           family: providerId,
           maxInputTokens: contextLength,
@@ -1424,9 +1452,12 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         // Build configuration schema if configured model supports thinking
         const configurationSchema = configuredModel ? this.buildConfigurationSchema(configuredModel) : undefined;
 
+        // Use provider-prefixed model ID to avoid conflicts between providers
+        const prefixedModelId = `${providerId}/${apiModel.id}`;
+
         // API priority: use API model id, but config values if available
         result.push({
-          id: apiModel.id,
+          id: prefixedModelId,
           name: formatName(configuredModel?.name ?? apiModel.id),
           family: providerId,
           maxInputTokens: configuredModel?.limit.context ?? this.gatewayConfig.defaultMaxTokens,
@@ -1985,8 +2016,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     const hasTools = (modelCapabilities?.toolCalling ?? this.gatewayConfig.enableToolCalling) &&
                      options.tools && options.tools.length > 0;
 
+    const requestModelId = resolvedModel?.id ?? model.id;
+
     const requestOptions: Record<string, unknown> = {
-      model: model.id,
+      model: requestModelId,
       messages: openAIMessages,
       max_tokens: safeMaxOutputTokens,
     };

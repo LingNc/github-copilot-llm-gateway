@@ -501,15 +501,20 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
         // Handle LanguageModelThinkingPart (reasoning content from models like DeepSeek)
         // @ts-ignore - LanguageModelThinkingPart may not be in the types yet
-        if (vscode.LanguageModelThinkingPart && part instanceof vscode.LanguageModelThinkingPart) {
+        const hasThinkingPart = !!vscode.LanguageModelThinkingPart;
+        const isThinkingPart = hasThinkingPart && part instanceof vscode.LanguageModelThinkingPart;
+
+        if (this.messageDebugLogsEnabled && part.constructor.name.toLowerCase().includes('thinking')) {
+          this.outputChannel.appendLine(`[Part Debug] Index ${i}: type=${part.constructor.name}, hasThinkingPart=${hasThinkingPart}, isThinkingPart=${isThinkingPart}`);
+        }
+
+        // @ts-ignore - LanguageModelThinkingPart may not be in the types yet
+        if (isThinkingPart) {
           // @ts-ignore
           const thinkingValue = part.value || '';
           if (thinkingValue) {
             reasoningContent += thinkingValue;
-            if (this.messageDebugLogsEnabled) {
-              this.outputChannel.appendLine(`[Part Debug] Index ${i}: type=LanguageModelThinkingPart`);
-              this.outputChannel.appendLine(`[Part Debug]   ThinkingPart: length=${thinkingValue.length}`);
-            }
+            this.outputChannel.appendLine(`[Part Debug] Index ${i}: type=LanguageModelThinkingPart, collected=${thinkingValue.length} chars`);
           }
         } else if (part instanceof vscode.LanguageModelTextPart) {
           // Only show detailed preview when message debug is enabled

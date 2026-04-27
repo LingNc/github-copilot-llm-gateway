@@ -44,6 +44,7 @@
   "view.tokenUsage.contextualTitle": "LLM Gateway Token Usage",
   "view.tokenUsage.welcome": "No active chat session.\nStart chatting to see token usage statistics.",
   "command.compactContext.title": "Compact Chat Context",
+  "command.clearReasoningCache.title": "Clear Reasoning Cache",
   "extension.displayName": "GitHub Copilot LLM Gateway",
   "extension.description": "Connect GitHub Copilot to open-source models via vLLM or any OpenAI-compatible server",
   "token.contextWindow": "Context Window",

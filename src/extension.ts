@@ -200,6 +200,21 @@ function registerCommands(
   );
   context.subscriptions.push(statusBarNoOpCommand);
 
+  // Clear reasoning cache command
+  const clearReasoningCacheCommand = vscode.commands.registerCommand(
+    'github.copilot.llm-gateway.clearReasoningCache',
+    async () => {
+      const provider = providerManager.getProvider();
+      if (provider) {
+        await provider.clearReasoningCache();
+        vscode.window.showInformationMessage('LLM Gateway: Reasoning cache cleared.');
+      } else {
+        vscode.window.showErrorMessage('LLM Gateway: Provider not initialized.');
+      }
+    }
+  );
+  context.subscriptions.push(clearReasoningCacheCommand);
+
   outputChannel.appendLine(`Registered commands`);
 }
 

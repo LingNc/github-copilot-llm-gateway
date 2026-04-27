@@ -56,6 +56,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   // Key: message index or identifier, Value: reasoning content
   private reasoningContentCache = new Map<number, string>();
   private reasoningCacheCounter = 0;
+  // Session ID for cache isolation between different chat sessions
+  private currentSessionId: string = '';
+  // Extension context for persistent storage
+  private extensionContext: vscode.ExtensionContext;
 
   constructor(
     context: vscode.ExtensionContext,
@@ -63,9 +67,13 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     outputChannel: vscode.OutputChannel,
     logService: LogService
   ) {
+    this.extensionContext = context;
     this.configManager = configManager;
     this.outputChannel = outputChannel;
     this.logService = logService;
+
+    // Load persisted cache from globalState
+    this.loadPersistedCache();
 
     // Load default config from first provider or global settings
     this.gatewayConfig = this.loadDefaultConfig();
@@ -147,6 +155,82 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         'token.compactContext': '整理对话上下文',
       };
       return translations[key] || key;
+    }
+  }
+
+  /**
+   * Generate a unique session ID based on current timestamp
+   * This helps isolate cache between different chat sessions
+   */
+  private generateSessionId(): string {
+    return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  /**
+   * Load persisted cache from globalState
+   * This allows reasoning content to survive VS Code restarts
+   */
+  private loadPersistedCache(): void {
+    try {
+      const savedCache = this.extensionContext.globalState.get<{
+        sessionId: string;
+        counter: number;
+        entries: Array<[number, string]>;
+        timestamp: number;
+      }>('llmGatewayReasoningCache');
+
+      if (savedCache) {
+        // Check if cache is not too old (7 days)
+        const now = Date.now();
+        const maxAge = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
+        if (now - savedCache.timestamp < maxAge) {
+          this.currentSessionId = savedCache.sessionId;
+          this.reasoningCacheCounter = savedCache.counter;
+          this.reasoningContentCache = new Map(savedCache.entries);
+          this.logService.info('Cache', `Loaded persisted reasoning cache: session=${savedCache.sessionId}, counter=${savedCache.counter}, entries=${savedCache.entries.length}`);
+        } else {
+          this.logService.info('Cache', 'Persisted cache expired (>7 days), starting fresh');
+          this.currentSessionId = this.generateSessionId();
+        }
+      } else {
+        this.currentSessionId = this.generateSessionId();
+      }
+    } catch (error) {
+      this.logService.warn('Cache', `Failed to load persisted cache: ${error}`);
+      this.currentSessionId = this.generateSessionId();
+    }
+  }
+
+  /**
+   * Persist cache to globalState
+   * This allows reasoning content to survive VS Code restarts
+   */
+  private persistCache(): void {
+    try {
+      const cacheData = {
+        sessionId: this.currentSessionId,
+        counter: this.reasoningCacheCounter,
+        entries: Array.from(this.reasoningContentCache.entries()),
+        timestamp: Date.now(),
+      };
+      this.extensionContext.globalState.update('llmGatewayReasoningCache', cacheData);
+    } catch (error) {
+      this.logService.warn('Cache', `Failed to persist cache: ${error}`);
+    }
+  }
+
+  /**
+   * Clear persisted cache (can be called manually or on session end)
+   */
+  private clearPersistedCache(): void {
+    try {
+      this.extensionContext.globalState.update('llmGatewayReasoningCache', undefined);
+      this.reasoningContentCache.clear();
+      this.reasoningCacheCounter = 0;
+      this.currentSessionId = this.generateSessionId();
+      this.logService.info('Cache', 'Cleared persisted reasoning cache');
+    } catch (error) {
+      this.logService.warn('Cache', `Failed to clear cache: ${error}`);
     }
   }
 
@@ -314,6 +398,13 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
    */
   public setTokenUsageProvider(provider: TokenUsageViewProvider): void {
     this.tokenUsageProvider = provider;
+  }
+
+  /**
+   * Clear reasoning cache (public method for command)
+   */
+  public async clearReasoningCache(): Promise<void> {
+    this.clearPersistedCache();
   }
 
   /**
@@ -2000,7 +2091,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     // Don't reset reasoning cache counter - it should persist across requests
     // to avoid overwriting previous responses' reasoning content
     if (this.debugLogsEnabled) {
-      this.outputChannel.appendLine(`[Reasoning Cache] Counter=${this.reasoningCacheCounter}, Cache size: ${this.reasoningContentCache.size}`);
+      this.outputChannel.appendLine(`[Reasoning Cache] Session=${this.currentSessionId}, Counter=${this.reasoningCacheCounter}, Cache size: ${this.reasoningContentCache.size}`);
     }
 
     this.showWelcomeNotification(model.id);
@@ -2339,6 +2430,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         if (this.debugLogsEnabled) {
           this.outputChannel.appendLine(`[Reasoning Cache] Stored reasoning for response ${this.reasoningCacheCounter}: ${accumulatedReasoning.length} chars, ${totalToolCalls} tool calls`);
         }
+        // Persist cache to globalState
+        this.persistCache();
         // Increment counter for next response
         this.reasoningCacheCounter++;
       }

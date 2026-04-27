@@ -484,6 +484,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       // Debug: log message content types (only when debug enabled)
       if (this.debugLogsEnabled) {
         const contentTypes = msg.content.map((p: unknown) => {
+          // @ts-ignore
+          if (vscode.LanguageModelThinkingPart && p instanceof vscode.LanguageModelThinkingPart) return 'thinking';
           if (p instanceof vscode.LanguageModelTextPart) return 'text';
           if (p instanceof vscode.LanguageModelDataPart) return 'data';
           if (p instanceof vscode.LanguageModelToolResultPart) return 'tool_result';
@@ -671,17 +673,15 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           .filter(p => p.type === 'text')
           .map(p => p.text)
           .join('');
-        const assistantMessage: Record<string, unknown> = { 
-          role: 'assistant', 
-          content: textContent || (reasoningContent ? '' : null), 
-          tool_calls: toolCalls 
+        const assistantMessage: Record<string, unknown> = {
+          role: 'assistant',
+          content: textContent || (reasoningContent ? '' : null),
+          tool_calls: toolCalls
         };
         // Add reasoning_content for DeepSeek API if present
         if (reasoningContent) {
           assistantMessage.reasoning_content = reasoningContent;
-          if (this.debugLogsEnabled) {
-            this.outputChannel.appendLine(`[Reasoning Debug] Added reasoning_content to assistant message with tool_calls, length=${reasoningContent.length}`);
-          }
+          this.outputChannel.appendLine(`[Reasoning Debug] Added reasoning_content to assistant message with tool_calls, length=${reasoningContent.length}`);
         }
         openAIMessages.push(assistantMessage);
       } else if (toolResults.length > 0) {
@@ -692,22 +692,18 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           const assistantMessage: Record<string, unknown> = { role, content: contentParts };
           if (reasoningContent) {
             assistantMessage.reasoning_content = reasoningContent;
-            if (this.debugLogsEnabled) {
-              this.outputChannel.appendLine(`[Reasoning Debug] Added reasoning_content to assistant message with images, length=${reasoningContent.length}`);
-            }
+            this.outputChannel.appendLine(`[Reasoning Debug] Added reasoning_content to assistant message with images, length=${reasoningContent.length}`);
           }
           openAIMessages.push(assistantMessage);
         } else {
           const textContent = contentParts.map(p => p.text).join('');
-          const assistantMessage: Record<string, unknown> = { 
-            role, 
-            content: textContent || (reasoningContent ? '' : null) 
+          const assistantMessage: Record<string, unknown> = {
+            role,
+            content: textContent || (reasoningContent ? '' : null)
           };
           if (reasoningContent) {
             assistantMessage.reasoning_content = reasoningContent;
-            if (this.debugLogsEnabled) {
-              this.outputChannel.appendLine(`[Reasoning Debug] Added reasoning_content to assistant message, length=${reasoningContent.length}`);
-            }
+            this.outputChannel.appendLine(`[Reasoning Debug] Added reasoning_content to assistant message, length=${reasoningContent.length}`);
           }
           openAIMessages.push(assistantMessage);
         }

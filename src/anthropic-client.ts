@@ -101,6 +101,15 @@ export class AnthropicClient {
       } else if (msg.role === 'assistant') {
         const content: AnthropicContentBlock[] = [];
 
+        // Handle reasoning_content for Anthropic thinking blocks
+        if ((msg as Record<string, unknown>).reasoning_content) {
+          content.push({
+            type: 'thinking',
+            thinking: String((msg as Record<string, unknown>).reasoning_content),
+            signature: '', // Anthropic requires signature, but we don't have it from DeepSeek
+          });
+        }
+
         if (msg.content) {
           content.push({ type: 'text', text: msg.content });
         }

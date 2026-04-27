@@ -332,6 +332,24 @@ src/provider/
 
 ### 已知问题
 
+#### DeepSeek reasoning_content 必须传递回 API（已修复 - v1.1.7）
+
+**症状**: 使用 DeepSeek 推理模型（如 `deepseek-v4-pro`）时，多轮对话后报错：
+```
+400 Bad Request - {"error":{"message":"The `reasoning_content` in the thinking mode must be passed back to the API.","type":"invalid_request_error"}}
+```
+
+**原因**: DeepSeek API 在使用 reasoning 模式时，要求将上一轮的 `reasoning_content` 原样传回。代码之前没有提取 `LanguageModelThinkingPart` 中的 reasoning 内容并传递给 API。
+
+**修复方案**:
+- 在 `convertMessagesWithCategories()` 方法中添加对 `LanguageModelThinkingPart` 的处理，提取 `reasoning_content`
+- 在 `convertSingleMessageWithLogging()` 方法中添加同样处理
+- 将 `reasoning_content` 添加到 assistant 消息中传递给 API
+
+**相关代码**: `src/provider.ts` 中的消息转换逻辑
+
+---
+
 #### 不同提供商重名模型冲突（已修复 - v1.1.6）
 
 **症状**: 不同提供商配置相同ID的模型（如都配置 `kimi-k2.5`），只显示第一个提供商的模型
@@ -406,6 +424,12 @@ src/provider/
 ---
 
 ### 发布历史
+
+#### v1.1.7 (2026-04-27)
+**问题修复 - DeepSeek reasoning_content 传递问题**
+- 修复 DeepSeek 推理模型多轮对话报错 `reasoning_content must be passed back to the API`
+- 在消息转换中添加对 `LanguageModelThinkingPart` 的处理
+- 将 `reasoning_content` 原样传回给 DeepSeek API
 
 #### v1.1.6 (2026-04-23)
 **问题修复 - 不同提供商重名模型ID冲突**

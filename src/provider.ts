@@ -479,6 +479,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       const toolResults: Record<string, unknown>[] = [];
       const toolCalls: Record<string, unknown>[] = [];
       const contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
+      let reasoningContent = ''; // Store reasoning_content for DeepSeek API
 
       // Debug: log message content types (only when debug enabled)
       if (this.debugLogsEnabled) {
@@ -496,7 +497,19 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         const part = msg.content[i];
         const partType = part.constructor.name;
 
-        if (part instanceof vscode.LanguageModelTextPart) {
+        // Handle LanguageModelThinkingPart (reasoning content from models like DeepSeek)
+        // @ts-ignore - LanguageModelThinkingPart may not be in the types yet
+        if (vscode.LanguageModelThinkingPart && part instanceof vscode.LanguageModelThinkingPart) {
+          // @ts-ignore
+          const thinkingValue = part.value || '';
+          if (thinkingValue) {
+            reasoningContent += thinkingValue;
+            if (this.messageDebugLogsEnabled) {
+              this.outputChannel.appendLine(`[Part Debug] Index ${i}: type=LanguageModelThinkingPart`);
+              this.outputChannel.appendLine(`[Part Debug]   ThinkingPart: length=${thinkingValue.length}`);
+            }
+          }
+        } else if (part instanceof vscode.LanguageModelTextPart) {
           // Only show detailed preview when message debug is enabled
           if (this.messageDebugLogsEnabled) {
             const textPreview = part.value.substring(0, 100).replace(/\n/g, '\\n');
@@ -658,16 +671,29 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           .filter(p => p.type === 'text')
           .map(p => p.text)
           .join('');
-        openAIMessages.push({ role: 'assistant', content: textContent || null, tool_calls: toolCalls });
+        const assistantMessage: Record<string, unknown> = { role: 'assistant', content: textContent || null, tool_calls: toolCalls };
+        // Add reasoning_content for DeepSeek API if present
+        if (reasoningContent) {
+          assistantMessage.reasoning_content = reasoningContent;
+        }
+        openAIMessages.push(assistantMessage);
       } else if (toolResults.length > 0) {
         openAIMessages.push(...toolResults);
-      } else if (contentParts.length > 0) {
+      } else if (contentParts.length > 0 || reasoningContent) {
         // Use array format if there are images, otherwise simple string for compatibility
         if (contentParts.some(p => p.type === 'image_url')) {
-          openAIMessages.push({ role, content: contentParts });
+          const assistantMessage: Record<string, unknown> = { role, content: contentParts };
+          if (reasoningContent) {
+            assistantMessage.reasoning_content = reasoningContent;
+          }
+          openAIMessages.push(assistantMessage);
         } else {
           const textContent = contentParts.map(p => p.text).join('');
-          openAIMessages.push({ role, content: textContent });
+          const assistantMessage: Record<string, unknown> = { role, content: textContent || null };
+          if (reasoningContent) {
+            assistantMessage.reasoning_content = reasoningContent;
+          }
+          openAIMessages.push(assistantMessage);
         }
       }
     }
@@ -1637,9 +1663,21 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     const toolResults: Record<string, unknown>[] = [];
     const toolCalls: Record<string, unknown>[] = [];
     const contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
+    let reasoningContent = ''; // Store reasoning_content for DeepSeek API
 
     for (const part of msg.content) {
-      if (part instanceof vscode.LanguageModelTextPart) {
+      // Handle LanguageModelThinkingPart (reasoning content from models like DeepSeek)
+      // @ts-ignore - LanguageModelThinkingPart may not be in the types yet
+      if (vscode.LanguageModelThinkingPart && part instanceof vscode.LanguageModelThinkingPart) {
+        // @ts-ignore
+        const thinkingValue = part.value || '';
+        if (thinkingValue) {
+          reasoningContent += thinkingValue;
+          if (this.debugLogsEnabled) {
+            this.outputChannel.appendLine(`  Found thinking part: length=${thinkingValue.length}`);
+          }
+        }
+      } else if (part instanceof vscode.LanguageModelTextPart) {
         if (this.debugLogsEnabled) {
           this.outputChannel.appendLine(`  Found text part: ${part.value.substring(0, 100)}${part.value.length > 100 ? '...' : ''}`);
         }
@@ -1681,16 +1719,29 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         .filter(p => p.type === 'text')
         .map(p => p.text)
         .join('');
-      result.push({ role: 'assistant', content: textContent || null, tool_calls: toolCalls });
+      const assistantMessage: Record<string, unknown> = { role: 'assistant', content: textContent || null, tool_calls: toolCalls };
+      // Add reasoning_content for DeepSeek API if present
+      if (reasoningContent) {
+        assistantMessage.reasoning_content = reasoningContent;
+      }
+      result.push(assistantMessage);
     } else if (toolResults.length > 0) {
       result.push(...toolResults);
-    } else if (contentParts.length > 0) {
+    } else if (contentParts.length > 0 || reasoningContent) {
       // Use array format if there are images
       if (contentParts.some(p => p.type === 'image_url')) {
-        result.push({ role, content: contentParts });
+        const assistantMessage: Record<string, unknown> = { role, content: contentParts };
+        if (reasoningContent) {
+          assistantMessage.reasoning_content = reasoningContent;
+        }
+        result.push(assistantMessage);
       } else {
         const textContent = contentParts.map(p => p.text).join('');
-        result.push({ role, content: textContent });
+        const assistantMessage: Record<string, unknown> = { role, content: textContent || null };
+        if (reasoningContent) {
+          assistantMessage.reasoning_content = reasoningContent;
+        }
+        result.push(assistantMessage);
       }
     }
     return result;

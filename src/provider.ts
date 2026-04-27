@@ -481,6 +481,15 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       const contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
       let reasoningContent = ''; // Store reasoning_content for DeepSeek API
 
+      // Check for cot_summary in assistant messages (Copilot Chat stores reasoning here)
+      const anyMsg = msg as Record<string, unknown>;
+      if (role === 'assistant' && anyMsg.cot_summary) {
+        reasoningContent = String(anyMsg.cot_summary);
+        if (this.debugLogsEnabled) {
+          this.outputChannel.appendLine(`[Reasoning Debug] Found cot_summary in assistant message: ${reasoningContent.length} chars`);
+        }
+      }
+
       // Debug: log message content types (only when debug enabled)
       if (this.debugLogsEnabled) {
         const contentTypes = msg.content.map((p: unknown) => {

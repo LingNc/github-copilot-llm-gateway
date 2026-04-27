@@ -683,17 +683,16 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       }
 
       if (toolCalls.length > 0) {
-        // For assistant messages with tool calls, retrieve reasoning from cache (required by DeepSeek API)
-        // DeepSeek requires reasoning_content for assistant messages that performed tool calls
+        // For assistant messages with tool calls, retrieve reasoning from cache
         let reasoningContent = '';
         const cachedReasoning = this.reasoningContentCache.get(assistantMessageIndex);
         if (cachedReasoning) {
           reasoningContent = cachedReasoning;
           if (this.debugLogsEnabled) {
-            this.outputChannel.appendLine(`[Reasoning Cache] Retrieved reasoning for tool-calling assistant ${assistantMessageIndex}: ${cachedReasoning.length} chars`);
+            this.outputChannel.appendLine(`[Reasoning Cache] Retrieved reasoning for assistant ${assistantMessageIndex}: ${cachedReasoning.length} chars`);
           }
         }
-        assistantMessageIndex++; // Increment only for assistant messages
+        assistantMessageIndex++;
 
         // For tool calls, we need to extract text content separately
         const textContent = contentParts
@@ -702,34 +701,48 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           .join('');
         const assistantMessage: Record<string, unknown> = {
           role: 'assistant',
-          content: textContent || (reasoningContent ? '' : null),
-          tool_calls: toolCalls
+          content: textContent || '',
+          tool_calls: toolCalls,
+          // DeepSeek V4 requires reasoning_content for ALL assistant messages when thinking is enabled
+          reasoning_content: reasoningContent || ''
         };
-        // Add reasoning_content for DeepSeek API if present
-        if (reasoningContent) {
-          assistantMessage.reasoning_content = reasoningContent;
-          this.outputChannel.appendLine(`[Reasoning Debug] Added reasoning_content to assistant message with tool_calls, length=${reasoningContent.length}`);
+        if (this.debugLogsEnabled) {
+          this.outputChannel.appendLine(`[Reasoning Debug] Added reasoning_content to tool-calling message: ${reasoningContent?.length || 0} chars`);
         }
         openAIMessages.push(assistantMessage);
       } else if (toolResults.length > 0) {
         openAIMessages.push(...toolResults);
       } else if (contentParts.length > 0) {
-        // Regular assistant message without tool calls - do NOT add reasoning_content
-        // DeepSeek API only requires reasoning_content for assistant messages that performed tool calls
-        // Increment assistant counter for consistency
+        // Regular assistant message without tool calls
+        // DeepSeek V4 requires reasoning_content for ALL assistant messages when thinking is enabled
         if (role === 'assistant') {
           assistantMessageIndex++;
         }
 
+        // Retrieve reasoning content for this assistant message (if available)
+        let reasoningContent = '';
+        const cachedReasoning = this.reasoningContentCache.get(assistantMessageIndex - 1);
+        if (cachedReasoning) {
+          reasoningContent = cachedReasoning;
+        }
+
         if (contentParts.some(p => p.type === 'image_url')) {
-          const assistantMessage: Record<string, unknown> = { role, content: contentParts };
+          const assistantMessage: Record<string, unknown> = {
+            role,
+            content: contentParts,
+            reasoning_content: reasoningContent || ''
+          };
           openAIMessages.push(assistantMessage);
         } else {
           const textContent = contentParts.map(p => p.text).join('');
           const assistantMessage: Record<string, unknown> = {
             role,
-            content: textContent || null
+            content: textContent || '',
+            reasoning_content: reasoningContent || ''
           };
+          if (this.debugLogsEnabled) {
+            this.outputChannel.appendLine(`[Reasoning Debug] Added reasoning_content to regular message: ${reasoningContent?.length || 0} chars`);
+          }
           openAIMessages.push(assistantMessage);
         }
       }
@@ -1984,11 +1997,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     this.outputChannel.appendLine(`Tool mode: ${options.toolMode}, Tools: ${options.tools?.length || 0}`);
     this.outputChannel.appendLine(`Message count: ${messages.length}`);
 
-    // Reset reasoning cache counter for this request
-    // This ensures assistant messages are matched with cached reasoning content in order
-    this.reasoningCacheCounter = 0;
+    // Don't reset reasoning cache counter - it should persist across requests
+    // to avoid overwriting previous responses' reasoning content
     if (this.debugLogsEnabled) {
-      this.outputChannel.appendLine(`[Reasoning Cache] Reset counter. Cache size: ${this.reasoningContentCache.size}`);
+      this.outputChannel.appendLine(`[Reasoning Cache] Counter=${this.reasoningCacheCounter}, Cache size: ${this.reasoningContentCache.size}`);
     }
 
     this.showWelcomeNotification(model.id);
@@ -2216,6 +2228,18 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       this.outputChannel.appendLine(debugRequest.length > 2000 ? `Request (truncated): ${debugRequest.substring(0, 2000)}...` : `Request: ${debugRequest}`);
     }
 
+    // Debug: Log assistant messages with reasoning_content
+    if (this.debugLogsEnabled) {
+      for (let i = 0; i < openAIMessages.length; i++) {
+        const msg = openAIMessages[i];
+        if (msg.role === 'assistant') {
+          const hasReasoning = 'reasoning_content' in msg;
+          const reasoningLen = hasReasoning ? String(msg.reasoning_content).length : 0;
+          this.outputChannel.appendLine(`[Request Debug] Assistant ${i}: hasReasoning=${hasReasoning}, reasoningLength=${reasoningLen}, hasToolCalls=${!!msg.tool_calls}`);
+        }
+      }
+    }
+
     try {
       let totalContent = '';
       let totalToolCalls = 0;
@@ -2308,17 +2332,15 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         }
       }
 
-      // Store accumulated reasoning content in cache ONLY if this response had tool calls
-      // DeepSeek API only requires reasoning_content for assistant messages that performed tool calls
-      if (accumulatedReasoning && totalToolCalls > 0) {
+      // Store accumulated reasoning content in cache for ALL responses
+      // DeepSeek V4 requires reasoning_content for ALL assistant messages when thinking is enabled
+      if (accumulatedReasoning) {
         this.reasoningContentCache.set(this.reasoningCacheCounter, accumulatedReasoning);
         if (this.debugLogsEnabled) {
-          this.outputChannel.appendLine(`[Reasoning Cache] Stored reasoning for tool-calling response ${this.reasoningCacheCounter}: ${accumulatedReasoning.length} chars, ${totalToolCalls} tool calls`);
+          this.outputChannel.appendLine(`[Reasoning Cache] Stored reasoning for response ${this.reasoningCacheCounter}: ${accumulatedReasoning.length} chars, ${totalToolCalls} tool calls`);
         }
         // Increment counter for next response
         this.reasoningCacheCounter++;
-      } else if (accumulatedReasoning && this.debugLogsEnabled) {
-        this.outputChannel.appendLine(`[Reasoning Cache] Skipped caching reasoning - no tool calls in response`);
       }
 
       // Estimate completion tokens from generated content if not provided by API

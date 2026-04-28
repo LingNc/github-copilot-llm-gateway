@@ -881,6 +881,23 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           }
           openAIMessages.push(assistantMessage);
         }
+      } else if (role === 'assistant') {
+        // Handle empty assistant messages - DeepSeek requires reasoning_content for ALL assistant messages
+        assistantMessageIndex++;
+        let reasoningContent = '';
+        const cachedReasoning = this.reasoningContentCache.get(assistantMessageIndex - 1);
+        if (cachedReasoning) {
+          reasoningContent = cachedReasoning;
+        }
+        const assistantMessage: Record<string, unknown> = {
+          role: 'assistant',
+          content: '',
+          reasoning_content: reasoningContent || ''
+        };
+        if (this.debugLogsEnabled) {
+          this.outputChannel.appendLine(`[Reasoning Debug] Added empty assistant message with reasoning_content: ${reasoningContent?.length || 0} chars`);
+        }
+        openAIMessages.push(assistantMessage);
       }
     }
 

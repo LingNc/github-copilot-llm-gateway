@@ -820,15 +820,19 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
       if (toolCalls.length > 0) {
         // For assistant messages with tool calls, retrieve reasoning from cache
+        // First increment index to track this assistant message
+        if (role === 'assistant') {
+          assistantMessageIndex++;
+        }
+
         let reasoningContent = '';
-        const cachedReasoning = this.reasoningContentCache.get(assistantMessageIndex);
+        const cachedReasoning = this.reasoningContentCache.get(assistantMessageIndex - 1);
         if (cachedReasoning) {
           reasoningContent = cachedReasoning;
           if (this.debugLogsEnabled) {
-            this.outputChannel.appendLine(`[Reasoning Cache] Retrieved reasoning for assistant ${assistantMessageIndex}: ${cachedReasoning.length} chars`);
+            this.outputChannel.appendLine(`[Reasoning Cache] Retrieved reasoning for assistant ${assistantMessageIndex - 1}: ${cachedReasoning.length} chars`);
           }
         }
-        assistantMessageIndex++;
 
         // For tool calls, we need to extract text content separately
         const textContent = contentParts

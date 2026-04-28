@@ -2425,12 +2425,22 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       this.outputChannel.appendLine(debugRequest.length > 2000 ? `Request (truncated): ${debugRequest.substring(0, 2000)}...` : `Request: ${debugRequest}`);
     }
 
+    // Ensure all assistant messages have reasoning_content for DeepSeek API compatibility
+    // DeepSeek V4 requires reasoning_content field (even if empty) for all assistant messages in thinking mode
+    for (const msg of openAIMessages) {
+      if (msg.role === 'assistant') {
+        if (!('reasoning_content' in msg) || msg.reasoning_content === undefined) {
+          msg.reasoning_content = '';
+        }
+      }
+    }
+
     // Debug: Log assistant messages with reasoning_content
     if (this.debugLogsEnabled) {
       for (let i = 0; i < openAIMessages.length; i++) {
         const msg = openAIMessages[i];
         if (msg.role === 'assistant') {
-          const hasReasoning = 'reasoning_content' in msg;
+          const hasReasoning = 'reasoning_content' in msg && msg.reasoning_content !== undefined;
           const reasoningLen = hasReasoning ? String(msg.reasoning_content).length : 0;
           this.outputChannel.appendLine(`[Request Debug] Assistant ${i}: hasReasoning=${hasReasoning}, reasoningLength=${reasoningLen}, hasToolCalls=${!!msg.tool_calls}`);
         }

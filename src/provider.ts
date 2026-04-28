@@ -1905,28 +1905,34 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         .filter(p => p.type === 'text')
         .map(p => p.text)
         .join('');
-      const assistantMessage: Record<string, unknown> = { role: 'assistant', content: textContent || null, tool_calls: toolCalls };
-      // Add reasoning_content for DeepSeek API if present
-      if (reasoningContent) {
-        assistantMessage.reasoning_content = reasoningContent;
-      }
+      const assistantMessage: Record<string, unknown> = {
+        role: 'assistant',
+        content: textContent || null,
+        tool_calls: toolCalls,
+        // DeepSeek V4 requires reasoning_content for ALL assistant messages when thinking is enabled
+        reasoning_content: reasoningContent || ''
+      };
       result.push(assistantMessage);
     } else if (toolResults.length > 0) {
       result.push(...toolResults);
     } else if (contentParts.length > 0 || reasoningContent) {
       // Use array format if there are images
       if (contentParts.some(p => p.type === 'image_url')) {
-        const assistantMessage: Record<string, unknown> = { role, content: contentParts };
-        if (reasoningContent) {
-          assistantMessage.reasoning_content = reasoningContent;
-        }
+        const assistantMessage: Record<string, unknown> = {
+          role,
+          content: contentParts,
+          // DeepSeek V4 requires reasoning_content for ALL assistant messages when thinking is enabled
+          reasoning_content: reasoningContent || ''
+        };
         result.push(assistantMessage);
       } else {
         const textContent = contentParts.map(p => p.text).join('');
-        const assistantMessage: Record<string, unknown> = { role, content: textContent || null };
-        if (reasoningContent) {
-          assistantMessage.reasoning_content = reasoningContent;
-        }
+        const assistantMessage: Record<string, unknown> = {
+          role,
+          content: textContent || null,
+          // DeepSeek V4 requires reasoning_content for ALL assistant messages when thinking is enabled
+          reasoning_content: reasoningContent || ''
+        };
         result.push(assistantMessage);
       }
     }

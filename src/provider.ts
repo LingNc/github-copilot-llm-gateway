@@ -1941,7 +1941,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
       const assistantMessage: Record<string, unknown> = {
         role: 'assistant',
-        content: textContent || null,
+        content: textContent || '',  // Use empty string instead of null for DeepSeek compatibility
         tool_calls: toolCalls,
         // DeepSeek V4 requires reasoning_content for ALL assistant messages when thinking is enabled
         reasoning_content: finalReasoningContent || ''
@@ -1976,7 +1976,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         const textContent = contentParts.map(p => p.text).join('');
         const assistantMessage: Record<string, unknown> = {
           role,
-          content: textContent || null,
+          content: textContent || '',  // Use empty string instead of null for DeepSeek compatibility
           // DeepSeek V4 requires reasoning_content for ALL assistant messages when thinking is enabled
           reasoning_content: finalReasoningContent || ''
         };
@@ -1984,6 +1984,25 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       }
       if (role === 'assistant') {
         assistantIndex++;
+      }
+    } else if (role === 'assistant') {
+      // Handle empty assistant messages - DeepSeek requires reasoning_content for ALL assistant messages
+      let finalReasoningContent = reasoningContent;
+      if (!finalReasoningContent) {
+        const cachedReasoning = this.reasoningContentCache.get(assistantIndex);
+        if (cachedReasoning) {
+          finalReasoningContent = cachedReasoning;
+        }
+      }
+      const assistantMessage: Record<string, unknown> = {
+        role: 'assistant',
+        content: '',
+        reasoning_content: finalReasoningContent || ''
+      };
+      result.push(assistantMessage);
+      assistantIndex++;
+      if (this.debugLogsEnabled) {
+        this.outputChannel.appendLine(`[Reasoning Debug] Added empty assistant message with reasoning_content: ${finalReasoningContent?.length || 0} chars`);
       }
     }
     return { messages: result, assistantIndex };

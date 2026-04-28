@@ -58,6 +58,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   private reasoningCacheCounter = 0;
   // Session ID for cache isolation between different chat sessions
   private currentSessionId: string = '';
+  // Message fingerprint to detect session changes
+  private lastMessageFingerprint: string = '';
   // Extension context for persistent storage
   private extensionContext: vscode.ExtensionContext;
 
@@ -164,6 +166,49 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
    */
   private generateSessionId(): string {
     return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  /**
+   * Generate a fingerprint from message history to detect session changes
+   * Uses first 3 messages content hash for efficiency
+   */
+  private generateMessageFingerprint(messages: readonly vscode.LanguageModelChatMessage[]): string {
+    try {
+      const sampleSize = Math.min(3, messages.length);
+      const samples: string[] = [];
+      for (let i = 0; i < sampleSize; i++) {
+        const msg = messages[i];
+        const content = typeof msg.content === 'string'
+          ? msg.content.slice(0, 200) // First 200 chars
+          : JSON.stringify(msg.content).slice(0, 200);
+        samples.push(`${msg.role}:${msg.name || ''}:${content.slice(0, 100)}`);
+      }
+      // Simple hash (not crypto-secure but fast)
+      let hash = 0;
+      const str = samples.join('|');
+      for (let i = 0; i < str.length; i++) {
+        const char = str.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash; // Convert to 32bit integer
+      }
+      return hash.toString(16);
+    } catch {
+      return 'error';
+    }
+  }
+
+  /**
+   * Check if current messages belong to same session
+   * Returns true if fingerprint matches or no previous fingerprint
+   */
+  private isSameSession(currentFingerprint: string): boolean {
+    if (!this.lastMessageFingerprint) {
+      return true; // First request in this session
+    }
+    // Allow partial match for incremental messages
+    // If current fingerprint starts with previous, it's likely same session
+    return currentFingerprint.startsWith(this.lastMessageFingerprint) ||
+           this.lastMessageFingerprint.startsWith(currentFingerprint);
   }
 
   /**
@@ -2088,8 +2133,17 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     this.outputChannel.appendLine(`Tool mode: ${options.toolMode}, Tools: ${options.tools?.length || 0}`);
     this.outputChannel.appendLine(`Message count: ${messages.length}`);
 
-    // Don't reset reasoning cache counter - it should persist across requests
-    // to avoid overwriting previous responses' reasoning content
+    // Generate message fingerprint to detect session changes
+    const currentFingerprint = this.generateMessageFingerprint(messages);
+    const isSameSession = this.isSameSession(currentFingerprint);
+
+    if (!isSameSession) {
+      // New session detected - clear cache and start fresh
+      this.outputChannel.appendLine(`[Reasoning Cache] New session detected, clearing cache. Old fingerprint: ${this.lastMessageFingerprint.slice(0, 16)}..., New: ${currentFingerprint.slice(0, 16)}...`);
+      this.clearPersistedCache();
+      this.lastMessageFingerprint = currentFingerprint;
+    }
+
     if (this.debugLogsEnabled) {
       this.outputChannel.appendLine(`[Reasoning Cache] Session=${this.currentSessionId}, Counter=${this.reasoningCacheCounter}, Cache size: ${this.reasoningContentCache.size}`);
     }

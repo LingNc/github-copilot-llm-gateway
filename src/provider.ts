@@ -1844,7 +1844,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   /**
    * Convert a single VS Code message to OpenAI format with logging
    */
-  private convertSingleMessageWithLogging(msg: vscode.LanguageModelChatMessage): Record<string, unknown>[] {
+  private convertSingleMessageWithLogging(
+    msg: vscode.LanguageModelChatMessage,
+    assistantIndex: number
+  ): { messages: Record<string, unknown>[]; assistantIndex: number } {
     const role = this.mapRole(msg.role);
     const toolResults: Record<string, unknown>[] = [];
     const toolCalls: Record<string, unknown>[] = [];
@@ -1905,24 +1908,47 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         .filter(p => p.type === 'text')
         .map(p => p.text)
         .join('');
+      // For assistant messages with tool calls, retrieve reasoning from cache
+      let finalReasoningContent = reasoningContent;
+      if (role === 'assistant' && !finalReasoningContent) {
+        // Try to get from cache if not present in message
+        const cachedReasoning = this.reasoningContentCache.get(assistantIndex);
+        if (cachedReasoning) {
+          finalReasoningContent = cachedReasoning;
+        }
+      }
+
       const assistantMessage: Record<string, unknown> = {
         role: 'assistant',
         content: textContent || null,
         tool_calls: toolCalls,
         // DeepSeek V4 requires reasoning_content for ALL assistant messages when thinking is enabled
-        reasoning_content: reasoningContent || ''
+        reasoning_content: finalReasoningContent || ''
       };
       result.push(assistantMessage);
+      if (role === 'assistant') {
+        assistantIndex++;
+      }
     } else if (toolResults.length > 0) {
       result.push(...toolResults);
     } else if (contentParts.length > 0 || reasoningContent) {
+      // Regular assistant message without tool calls
+      // For assistant messages, retrieve reasoning from cache if not present
+      let finalReasoningContent = reasoningContent;
+      if (role === 'assistant' && !finalReasoningContent) {
+        const cachedReasoning = this.reasoningContentCache.get(assistantIndex);
+        if (cachedReasoning) {
+          finalReasoningContent = cachedReasoning;
+        }
+      }
+
       // Use array format if there are images
       if (contentParts.some(p => p.type === 'image_url')) {
         const assistantMessage: Record<string, unknown> = {
           role,
           content: contentParts,
           // DeepSeek V4 requires reasoning_content for ALL assistant messages when thinking is enabled
-          reasoning_content: reasoningContent || ''
+          reasoning_content: finalReasoningContent || ''
         };
         result.push(assistantMessage);
       } else {
@@ -1931,12 +1957,15 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           role,
           content: textContent || null,
           // DeepSeek V4 requires reasoning_content for ALL assistant messages when thinking is enabled
-          reasoning_content: reasoningContent || ''
+          reasoning_content: finalReasoningContent || ''
         };
         result.push(assistantMessage);
       }
+      if (role === 'assistant') {
+        assistantIndex++;
+      }
     }
-    return result;
+    return { messages: result, assistantIndex };
   }
 
   /**

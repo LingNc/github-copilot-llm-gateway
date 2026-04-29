@@ -52,16 +52,6 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   private currentTokenDetails?: Array<{ category: string; label: string; percentage: number }>;
   // Token usage view provider
   private tokenUsageProvider?: TokenUsageViewProvider;
-  // Cache for reasoning content (DeepSeek API requires passing reasoning_content back in multi-turn conversations)
-  // Key: message index or identifier, Value: reasoning content
-  private reasoningContentCache = new Map<number, string>();
-  private reasoningCacheCounter = 0;
-  // Session ID for cache isolation between different chat sessions
-  private currentSessionId: string = '';
-  // Message fingerprint to detect session changes
-  private lastMessageFingerprint: string = '';
-  // Extension context for persistent storage
-  private extensionContext: vscode.ExtensionContext;
 
   constructor(
     context: vscode.ExtensionContext,
@@ -69,13 +59,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     outputChannel: vscode.OutputChannel,
     logService: LogService
   ) {
-    this.extensionContext = context;
     this.configManager = configManager;
     this.outputChannel = outputChannel;
     this.logService = logService;
-
-    // Load persisted cache from globalState
-    this.loadPersistedCache();
 
     // Load default config from first provider or global settings
     this.gatewayConfig = this.loadDefaultConfig();
@@ -157,125 +143,6 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         'token.compactContext': '整理对话上下文',
       };
       return translations[key] || key;
-    }
-  }
-
-  /**
-   * Generate a unique session ID based on current timestamp
-   * This helps isolate cache between different chat sessions
-   */
-  private generateSessionId(): string {
-    return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  }
-
-  /**
-   * Generate a fingerprint from message history to detect session changes
-   * Uses first 3 messages content hash for efficiency
-   */
-  private generateMessageFingerprint(messages: readonly vscode.LanguageModelChatMessage[]): string {
-    try {
-      const sampleSize = Math.min(3, messages.length);
-      const samples: string[] = [];
-      for (let i = 0; i < sampleSize; i++) {
-        const msg = messages[i];
-        const content = typeof msg.content === 'string'
-          ? msg.content.slice(0, 200) // First 200 chars
-          : JSON.stringify(msg.content).slice(0, 200);
-        samples.push(`${msg.role}:${msg.name || ''}:${content.slice(0, 100)}`);
-      }
-      // Simple hash (not crypto-secure but fast)
-      let hash = 0;
-      const str = samples.join('|');
-      for (let i = 0; i < str.length; i++) {
-        const char = str.charCodeAt(i);
-        hash = ((hash << 5) - hash) + char;
-        hash = hash & hash; // Convert to 32bit integer
-      }
-      return hash.toString(16);
-    } catch {
-      return 'error';
-    }
-  }
-
-  /**
-   * Check if current messages belong to same session
-   * Returns true if fingerprint matches or no previous fingerprint
-   */
-  private isSameSession(currentFingerprint: string): boolean {
-    if (!this.lastMessageFingerprint) {
-      return true; // First request in this session
-    }
-    // Allow partial match for incremental messages
-    // If current fingerprint starts with previous, it's likely same session
-    return currentFingerprint.startsWith(this.lastMessageFingerprint) ||
-           this.lastMessageFingerprint.startsWith(currentFingerprint);
-  }
-
-  /**
-   * Load persisted cache from globalState
-   * This allows reasoning content to survive VS Code restarts
-   */
-  private loadPersistedCache(): void {
-    try {
-      const savedCache = this.extensionContext.globalState.get<{
-        sessionId: string;
-        counter: number;
-        entries: Array<[number, string]>;
-        timestamp: number;
-      }>('llmGatewayReasoningCache');
-
-      if (savedCache) {
-        // Check if cache is not too old (7 days)
-        const now = Date.now();
-        const maxAge = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
-        if (now - savedCache.timestamp < maxAge) {
-          this.currentSessionId = savedCache.sessionId;
-          this.reasoningCacheCounter = savedCache.counter;
-          this.reasoningContentCache = new Map(savedCache.entries);
-          this.logService.info('Cache', `Loaded persisted reasoning cache: session=${savedCache.sessionId}, counter=${savedCache.counter}, entries=${savedCache.entries.length}`);
-        } else {
-          this.logService.info('Cache', 'Persisted cache expired (>7 days), starting fresh');
-          this.currentSessionId = this.generateSessionId();
-        }
-      } else {
-        this.currentSessionId = this.generateSessionId();
-      }
-    } catch (error) {
-      this.logService.warn('Cache', `Failed to load persisted cache: ${error}`);
-      this.currentSessionId = this.generateSessionId();
-    }
-  }
-
-  /**
-   * Persist cache to globalState
-   * This allows reasoning content to survive VS Code restarts
-   */
-  private persistCache(): void {
-    try {
-      const cacheData = {
-        sessionId: this.currentSessionId,
-        counter: this.reasoningCacheCounter,
-        entries: Array.from(this.reasoningContentCache.entries()),
-        timestamp: Date.now(),
-      };
-      this.extensionContext.globalState.update('llmGatewayReasoningCache', cacheData);
-    } catch (error) {
-      this.logService.warn('Cache', `Failed to persist cache: ${error}`);
-    }
-  }
-
-  /**
-   * Clear persisted cache (can be called manually or on session end)
-   */
-  private clearPersistedCache(): void {
-    try {
-      this.extensionContext.globalState.update('llmGatewayReasoningCache', undefined);
-      this.reasoningContentCache.clear();
-      this.reasoningCacheCounter = 0;
-      this.currentSessionId = this.generateSessionId();
-      this.logService.info('Cache', 'Cleared persisted reasoning cache');
-    } catch (error) {
-      this.logService.warn('Cache', `Failed to clear cache: ${error}`);
     }
   }
 
@@ -446,13 +313,6 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   }
 
   /**
-   * Clear reasoning cache (public method for command)
-   */
-  public async clearReasoningCache(): Promise<void> {
-    this.clearPersistedCache();
-  }
-
-  /**
    * Dispose provider resources
    */
   public dispose(): void {
@@ -613,19 +473,17 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     let messagesTokens = 0;
     let filesTokens = 0;
     let toolResultsTokens = 0;
-    let assistantMessageIndex = 0; // Track assistant message index for reasoning cache lookup
 
     for (const msg of messages) {
       const role = this.mapRole(msg.role);
       const toolResults: Record<string, unknown>[] = [];
       const toolCalls: Record<string, unknown>[] = [];
       const contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
+      let reasoningContent = ''; // Store reasoning_content for DeepSeek API
 
       // Debug: log message content types (only when debug enabled)
       if (this.debugLogsEnabled) {
         const contentTypes = msg.content.map((p: unknown) => {
-          // @ts-ignore
-          if (vscode.LanguageModelThinkingPart && p instanceof vscode.LanguageModelThinkingPart) return 'thinking';
           if (p instanceof vscode.LanguageModelTextPart) return 'text';
           if (p instanceof vscode.LanguageModelDataPart) return 'data';
           if (p instanceof vscode.LanguageModelToolResultPart) return 'tool_result';
@@ -639,28 +497,17 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         const part = msg.content[i];
         const partType = part.constructor.name;
 
-        // Debug: Log all part types to understand what's coming in
-        if (this.debugLogsEnabled) {
-          this.outputChannel.appendLine(`[Part Debug] Index ${i}: constructor=${partType}, keys=[${Object.keys(part).join(',')}]`);
-        }
-
         // Handle LanguageModelThinkingPart (reasoning content from models like DeepSeek)
         // @ts-ignore - LanguageModelThinkingPart may not be in the types yet
-        const hasThinkingPart = !!vscode.LanguageModelThinkingPart;
-        // @ts-ignore
-        const isThinkingPart = hasThinkingPart && part instanceof vscode.LanguageModelThinkingPart;
-
-        if (this.debugLogsEnabled) {
-          this.outputChannel.appendLine(`[Part Debug] Index ${i}: hasThinkingPart=${hasThinkingPart}, isThinkingPart=${isThinkingPart}`);
-        }
-
-        // @ts-ignore - LanguageModelThinkingPart may not be in the types yet
-        if (isThinkingPart) {
-          // Skip thinking parts - reasoning content is now handled via cache for tool-calling messages
-          if (this.debugLogsEnabled) {
-            // @ts-ignore
-            const thinkingValue = part.value || '';
-            this.outputChannel.appendLine(`[Part Debug] Index ${i}: type=LanguageModelThinkingPart, skipped (using cache), length=${thinkingValue.length} chars`);
+        if (vscode.LanguageModelThinkingPart && part instanceof vscode.LanguageModelThinkingPart) {
+          // @ts-ignore
+          const thinkingValue = part.value || '';
+          if (thinkingValue) {
+            reasoningContent += thinkingValue;
+            if (this.messageDebugLogsEnabled) {
+              this.outputChannel.appendLine(`[Part Debug] Index ${i}: type=LanguageModelThinkingPart`);
+              this.outputChannel.appendLine(`[Part Debug]   ThinkingPart: length=${thinkingValue.length}`);
+            }
           }
         } else if (part instanceof vscode.LanguageModelTextPart) {
           // Only show detailed preview when message debug is enabled
@@ -819,89 +666,35 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       }
 
       if (toolCalls.length > 0) {
-        // For assistant messages with tool calls, retrieve reasoning from cache
-        // First increment index to track this assistant message
-        if (role === 'assistant') {
-          assistantMessageIndex++;
-        }
-
-        let reasoningContent = '';
-        const cachedReasoning = this.reasoningContentCache.get(assistantMessageIndex - 1);
-        if (cachedReasoning) {
-          reasoningContent = cachedReasoning;
-          if (this.debugLogsEnabled) {
-            this.outputChannel.appendLine(`[Reasoning Cache] Retrieved reasoning for assistant ${assistantMessageIndex - 1}: ${cachedReasoning.length} chars`);
-          }
-        }
-
         // For tool calls, we need to extract text content separately
         const textContent = contentParts
           .filter(p => p.type === 'text')
           .map(p => p.text)
           .join('');
-        const assistantMessage: Record<string, unknown> = {
-          role: 'assistant',
-          content: textContent || '',
-          tool_calls: toolCalls,
-          // DeepSeek V4 requires reasoning_content for ALL assistant messages when thinking is enabled
-          reasoning_content: reasoningContent || ''
-        };
-        if (this.debugLogsEnabled) {
-          this.outputChannel.appendLine(`[Reasoning Debug] Added reasoning_content to tool-calling message: ${reasoningContent?.length || 0} chars`);
+        const assistantMessage: Record<string, unknown> = { role: 'assistant', content: textContent || null, tool_calls: toolCalls };
+        // Add reasoning_content for DeepSeek API if present
+        if (reasoningContent) {
+          assistantMessage.reasoning_content = reasoningContent;
         }
         openAIMessages.push(assistantMessage);
       } else if (toolResults.length > 0) {
         openAIMessages.push(...toolResults);
-      } else if (contentParts.length > 0) {
-        // Regular assistant message without tool calls
-        // DeepSeek V4 requires reasoning_content for ALL assistant messages when thinking is enabled
-        if (role === 'assistant') {
-          assistantMessageIndex++;
-        }
-
-        // Retrieve reasoning content for this assistant message (if available)
-        let reasoningContent = '';
-        const cachedReasoning = this.reasoningContentCache.get(assistantMessageIndex - 1);
-        if (cachedReasoning) {
-          reasoningContent = cachedReasoning;
-        }
-
+      } else if (contentParts.length > 0 || reasoningContent) {
+        // Use array format if there are images, otherwise simple string for compatibility
         if (contentParts.some(p => p.type === 'image_url')) {
-          const assistantMessage: Record<string, unknown> = {
-            role,
-            content: contentParts,
-            reasoning_content: reasoningContent || ''
-          };
+          const assistantMessage: Record<string, unknown> = { role, content: contentParts };
+          if (reasoningContent) {
+            assistantMessage.reasoning_content = reasoningContent;
+          }
           openAIMessages.push(assistantMessage);
         } else {
           const textContent = contentParts.map(p => p.text).join('');
-          const assistantMessage: Record<string, unknown> = {
-            role,
-            content: textContent || '',
-            reasoning_content: reasoningContent || ''
-          };
-          if (this.debugLogsEnabled) {
-            this.outputChannel.appendLine(`[Reasoning Debug] Added reasoning_content to regular message: ${reasoningContent?.length || 0} chars`);
+          const assistantMessage: Record<string, unknown> = { role, content: textContent || null };
+          if (reasoningContent) {
+            assistantMessage.reasoning_content = reasoningContent;
           }
           openAIMessages.push(assistantMessage);
         }
-      } else if (role === 'assistant') {
-        // Handle empty assistant messages - DeepSeek requires reasoning_content for ALL assistant messages
-        assistantMessageIndex++;
-        let reasoningContent = '';
-        const cachedReasoning = this.reasoningContentCache.get(assistantMessageIndex - 1);
-        if (cachedReasoning) {
-          reasoningContent = cachedReasoning;
-        }
-        const assistantMessage: Record<string, unknown> = {
-          role: 'assistant',
-          content: '',
-          reasoning_content: reasoningContent || ''
-        };
-        if (this.debugLogsEnabled) {
-          this.outputChannel.appendLine(`[Reasoning Debug] Added empty assistant message with reasoning_content: ${reasoningContent?.length || 0} chars`);
-        }
-        openAIMessages.push(assistantMessage);
       }
     }
 
@@ -1865,10 +1658,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   /**
    * Convert a single VS Code message to OpenAI format with logging
    */
-  private convertSingleMessageWithLogging(
-    msg: vscode.LanguageModelChatMessage,
-    assistantIndex: number
-  ): { messages: Record<string, unknown>[]; assistantIndex: number } {
+  private convertSingleMessageWithLogging(msg: vscode.LanguageModelChatMessage): Record<string, unknown>[] {
     const role = this.mapRole(msg.role);
     const toolResults: Record<string, unknown>[] = [];
     const toolCalls: Record<string, unknown>[] = [];
@@ -1929,83 +1719,32 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         .filter(p => p.type === 'text')
         .map(p => p.text)
         .join('');
-      // For assistant messages with tool calls, retrieve reasoning from cache
-      let finalReasoningContent = reasoningContent;
-      if (role === 'assistant' && !finalReasoningContent) {
-        // Try to get from cache if not present in message
-        const cachedReasoning = this.reasoningContentCache.get(assistantIndex);
-        if (cachedReasoning) {
-          finalReasoningContent = cachedReasoning;
-        }
+      const assistantMessage: Record<string, unknown> = { role: 'assistant', content: textContent || null, tool_calls: toolCalls };
+      // Add reasoning_content for DeepSeek API if present
+      if (reasoningContent) {
+        assistantMessage.reasoning_content = reasoningContent;
       }
-
-      const assistantMessage: Record<string, unknown> = {
-        role: 'assistant',
-        content: textContent || '',  // Use empty string instead of null for DeepSeek compatibility
-        tool_calls: toolCalls,
-        // DeepSeek V4 requires reasoning_content for ALL assistant messages when thinking is enabled
-        reasoning_content: finalReasoningContent || ''
-      };
       result.push(assistantMessage);
-      if (role === 'assistant') {
-        assistantIndex++;
-      }
     } else if (toolResults.length > 0) {
       result.push(...toolResults);
     } else if (contentParts.length > 0 || reasoningContent) {
-      // Regular assistant message without tool calls
-      // For assistant messages, retrieve reasoning from cache if not present
-      let finalReasoningContent = reasoningContent;
-      if (role === 'assistant' && !finalReasoningContent) {
-        const cachedReasoning = this.reasoningContentCache.get(assistantIndex);
-        if (cachedReasoning) {
-          finalReasoningContent = cachedReasoning;
-        }
-      }
-
       // Use array format if there are images
       if (contentParts.some(p => p.type === 'image_url')) {
-        const assistantMessage: Record<string, unknown> = {
-          role,
-          content: contentParts,
-          // DeepSeek V4 requires reasoning_content for ALL assistant messages when thinking is enabled
-          reasoning_content: finalReasoningContent || ''
-        };
+        const assistantMessage: Record<string, unknown> = { role, content: contentParts };
+        if (reasoningContent) {
+          assistantMessage.reasoning_content = reasoningContent;
+        }
         result.push(assistantMessage);
       } else {
         const textContent = contentParts.map(p => p.text).join('');
-        const assistantMessage: Record<string, unknown> = {
-          role,
-          content: textContent || '',  // Use empty string instead of null for DeepSeek compatibility
-          // DeepSeek V4 requires reasoning_content for ALL assistant messages when thinking is enabled
-          reasoning_content: finalReasoningContent || ''
-        };
+        const assistantMessage: Record<string, unknown> = { role, content: textContent || null };
+        if (reasoningContent) {
+          assistantMessage.reasoning_content = reasoningContent;
+        }
         result.push(assistantMessage);
       }
-      if (role === 'assistant') {
-        assistantIndex++;
-      }
-    } else if (role === 'assistant') {
-      // Handle empty assistant messages - DeepSeek requires reasoning_content for ALL assistant messages
-      let finalReasoningContent = reasoningContent;
-      if (!finalReasoningContent) {
-        const cachedReasoning = this.reasoningContentCache.get(assistantIndex);
-        if (cachedReasoning) {
-          finalReasoningContent = cachedReasoning;
-        }
-      }
-      const assistantMessage: Record<string, unknown> = {
-        role: 'assistant',
-        content: '',
-        reasoning_content: finalReasoningContent || ''
-      };
-      result.push(assistantMessage);
-      assistantIndex++;
-      if (this.debugLogsEnabled) {
-        this.outputChannel.appendLine(`[Reasoning Debug] Added empty assistant message with reasoning_content: ${finalReasoningContent?.length || 0} chars`);
-      }
     }
-    return { messages: result, assistantIndex };
+    return result;
   }
 
   /**
@@ -2207,21 +1946,6 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     this.outputChannel.appendLine(`Sending chat request to model: ${model.id}`);
     this.outputChannel.appendLine(`Tool mode: ${options.toolMode}, Tools: ${options.tools?.length || 0}`);
     this.outputChannel.appendLine(`Message count: ${messages.length}`);
-
-    // Generate message fingerprint to detect session changes
-    const currentFingerprint = this.generateMessageFingerprint(messages);
-    const isSameSession = this.isSameSession(currentFingerprint);
-
-    if (!isSameSession) {
-      // New session detected - clear cache and start fresh
-      this.outputChannel.appendLine(`[Reasoning Cache] New session detected, clearing cache. Old fingerprint: ${this.lastMessageFingerprint.slice(0, 16)}..., New: ${currentFingerprint.slice(0, 16)}...`);
-      this.clearPersistedCache();
-      this.lastMessageFingerprint = currentFingerprint;
-    }
-
-    if (this.debugLogsEnabled) {
-      this.outputChannel.appendLine(`[Reasoning Cache] Session=${this.currentSessionId}, Counter=${this.reasoningCacheCounter}, Cache size: ${this.reasoningContentCache.size}`);
-    }
 
     this.showWelcomeNotification(model.id);
 
@@ -2448,33 +2172,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       this.outputChannel.appendLine(debugRequest.length > 2000 ? `Request (truncated): ${debugRequest.substring(0, 2000)}...` : `Request: ${debugRequest}`);
     }
 
-    // Ensure all assistant messages have reasoning_content for DeepSeek API compatibility
-    // DeepSeek V4 requires reasoning_content field (even if empty) for all assistant messages in thinking mode
-    for (const msg of openAIMessages) {
-      if (msg.role === 'assistant') {
-        if (!('reasoning_content' in msg) || msg.reasoning_content === undefined) {
-          msg.reasoning_content = '';
-        }
-      }
-    }
-
-    // Debug: Log assistant messages with reasoning_content
-    if (this.debugLogsEnabled) {
-      for (let i = 0; i < openAIMessages.length; i++) {
-        const msg = openAIMessages[i];
-        if (msg.role === 'assistant') {
-          const hasReasoning = 'reasoning_content' in msg && msg.reasoning_content !== undefined;
-          const reasoningLen = hasReasoning ? String(msg.reasoning_content).length : 0;
-          this.outputChannel.appendLine(`[Request Debug] Assistant ${i}: hasReasoning=${hasReasoning}, reasoningLength=${reasoningLen}, hasToolCalls=${!!msg.tool_calls}`);
-        }
-      }
-    }
-
     try {
       let totalContent = '';
       let totalToolCalls = 0;
-      // Accumulate reasoning content for this response (needed for DeepSeek API multi-turn)
-      let accumulatedReasoning = '';
       // Initialize with estimated values as fallback
       // Many OpenAI-compatible APIs don't return usage data in streaming mode
       let promptTokens = estimatedInputTokens || 0;
@@ -2494,7 +2194,6 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           // Try to use LanguageModelThinkingPart if available (VS Code API), otherwise accumulate silently
           if (chunk.thinking) {
             totalContent += chunk.thinking;
-            accumulatedReasoning += chunk.thinking;
             // Try to report as ThinkingPart for collapsible UI, fallback to silent accumulation
             try {
               // @ts-ignore - LanguageModelThinkingPart may not be in the types yet
@@ -2534,7 +2233,6 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           // Try to use LanguageModelThinkingPart if available for collapsible UI
           if (chunk.reasoning) {
             totalContent += chunk.reasoning;
-            accumulatedReasoning += chunk.reasoning;
             try {
               // @ts-ignore - LanguageModelThinkingPart may not be in the types yet
               if (vscode.LanguageModelThinkingPart) {
@@ -2560,19 +2258,6 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
             }
           }
         }
-      }
-
-      // Store accumulated reasoning content in cache for ALL responses
-      // DeepSeek V4 requires reasoning_content for ALL assistant messages when thinking is enabled
-      if (accumulatedReasoning) {
-        this.reasoningContentCache.set(this.reasoningCacheCounter, accumulatedReasoning);
-        if (this.debugLogsEnabled) {
-          this.outputChannel.appendLine(`[Reasoning Cache] Stored reasoning for response ${this.reasoningCacheCounter}: ${accumulatedReasoning.length} chars, ${totalToolCalls} tool calls`);
-        }
-        // Persist cache to globalState
-        this.persistCache();
-        // Increment counter for next response
-        this.reasoningCacheCounter++;
       }
 
       // Estimate completion tokens from generated content if not provided by API

@@ -259,7 +259,7 @@
         },
         "github.copilot.llm-gateway.enableCopilotUsageReport": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "%config.enableCopilotUsageReport.description%",
           "markdownDescription": "%config.enableCopilotUsageReport.markdownDescription%",
           "order": 19

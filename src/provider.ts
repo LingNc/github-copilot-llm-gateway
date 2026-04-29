@@ -2306,26 +2306,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           });
         }
 
-        // Report token usage via DataPart (experimental)
-        // This attempts to send token usage through a special MIME type that Copilot Chat might recognize
-        try {
-          const usageData = new TextEncoder().encode(JSON.stringify({
-            promptTokens,
-            completionTokens,
-            totalTokens: promptTokens + completionTokens,
-            outputBuffer: safeMaxOutputTokens,
-            timestamp: Date.now(),
-          }));
-          progress.report(new vscode.LanguageModelDataPart(usageData, 'application/vnd.github.copilot-llm-gateway.usage+json'));
-          this.outputChannel.appendLine(`Token usage reported via DataPart: prompt=${promptTokens}, completion=${completionTokens}`);
-        } catch (e) {
-          this.outputChannel.appendLine(`Token usage DataPart failed: ${e}`);
-        }
-
-        // Report token usage if the API supports it (fallback)
-        // Note: progress.usage is part of the proposed API and may not be available in all VS Code versions
-        // This feature is controlled by enableCopilotUsageReport setting (default: false) due to potential compatibility issues
-        const copilotUsageReportEnabled = vscode.workspace.getConfiguration('github.copilot.llm-gateway').get<boolean>('enableCopilotUsageReport', false);
+        // Report token usage to Copilot Chat via progress.usage() API
+        const copilotUsageReportEnabled = vscode.workspace.getConfiguration('github.copilot.llm-gateway').get<boolean>('enableCopilotUsageReport', true);
         if (copilotUsageReportEnabled && typeof (progress as any).usage === 'function') {
           try {
             (progress as any).usage({
